@@ -75,7 +75,7 @@ class DiagnosticHTTPTest(unittest.TestCase):
 
   def test_support_code_captures_on_device_and_confirms_delivery(self):
     _, _, self.cookie = self.request('/api/auth/session')
-    code = 'ab12' * 3
+    code = 'j2q7m4x8z0tw'
     path = '/api/companion/support-ticket'
     def post(action):
       return self.request(path, method='POST', payload={'code': code, 'action': action})

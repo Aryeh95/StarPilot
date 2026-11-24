@@ -1834,7 +1834,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.json(401, {'error': 'Sign in to Galaxy'})
           return
         if (not isinstance(payload, dict) or not isinstance(payload.get('code'), str) or
-            not re.fullmatch(r'[0-9a-f]{16}', payload['code']) or payload.get('action') not in ('check', 'send')):
+            not re.fullmatch(r'[0-9a-hjkmnp-tv-z]{12}', payload['code']) or payload.get('action') not in ('check', 'send')):
           self.json(400, {'error': 'Enter the code from the Discord request.'})
           return
         relay = 'https://starpilot-log-relay.nathan-g-hubbard.workers.dev/report/galaxy/device'

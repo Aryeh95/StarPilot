@@ -69,6 +69,7 @@ export const ConnectionLogs = {
       this.captureError = ""
     },
     async threadAction(action) {
+      this.$refs?.supportCodeField?.blur()
       if (this.supportBusy) return
       this.supportBusy = true
       this.captureError = ""
@@ -141,7 +142,7 @@ export const ConnectionLogs = {
     <details v-if="!ticket"><summary class="gx-btn">Send to existing Discord thread</summary>
       <p v-if="supportSent" role="status">Support received the logs. Your Discord thread has the receipt.</p>
       <form v-else class="gx-log-form" @submit.prevent="threadAction(supportTicket ? 'send' : 'check')">
-        <label class="gx-field-group">Discord request code<input class="gx-field" v-model="supportCode" :disabled="supportBusy" @input="supportTicket = null; captureError = ''" maxlength="24" autocomplete="off" spellcheck="false"></label>
+        <label class="gx-field-group">Discord request code<input ref="supportCodeField" class="gx-field" v-model="supportCode" enterkeyhint="go" autocapitalize="none" autocorrect="off" :disabled="supportBusy" @input="supportTicket = null; captureError = ''" maxlength="24" autocomplete="off" spellcheck="false"></label>
         <button v-if="!supportTicket" class="gx-btn" type="submit" :disabled="supportBusy || !supportCode.trim()">{{ supportBusy ? 'Finding report…' : 'Find report' }}</button>
         <template v-else><p>{{ supportTicket.title }}</p><p>Only support staff receive the {{ supportTicket.kind }} logs.</p>
           <button class="gx-btn" type="submit" :disabled="supportBusy">{{ supportBusy ? 'Sending…' : 'Capture and send' }}</button>

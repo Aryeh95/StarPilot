@@ -1,3 +1,4 @@
+import { requestJson } from "./startup.js"
 import { DrivingHelp } from "./driving-help.js"
 import { ConnectionLogs } from "./local-access.js"
 import { WikiHelp } from './wiki-help.js'
@@ -22,7 +23,7 @@ export const Logs = {
   data: () => ({
     crashes: { reports: [], scanIncomplete: false, listLimited: false, status: "idle", error: "", selected: null, preview: null, previewStatus: "idle", deleting: false, storageBytes: 0, reportCount: 0 }, search: "",
     starportLogs: { sessions: [], others: [], status: "idle", error: "" }, bluetooth: bluetoothConnection(),
-    logSend: { state: "idle", message: "", available: true, fork: false, error: "" }, sendNote: "", sendDiscord: "", messageLimit: MESSAGE_LIMIT
+    logSend: { state: "idle", message: "", available: true, fork: false, error: "" }, sendNote: "", code: "", ticket: "", checking: false, lookupError: "", messageLimit: MESSAGE_LIMIT
   }),
   computed: {
     freshRequest() {
@@ -55,8 +56,26 @@ export const Logs = {
     bundleUrl: () => BUNDLE_URL,
     fileUrl,
     outcomeLabel,
+    async findReport() {
+      if (this.checking) return
+      this.checking = true
+      this.lookupError = ""
+      this.ticket = ""
+      try {
+        const result = await requestJson("./api/companion/support-ticket", { request: {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "check", code: this.code.replace(/[\s-]/g, "").toLowerCase() })
+        } })
+        if (result.kind === "starport") this.ticket = result.title
+        else this.lookupError = "Open the StarPort log request in Discord for a StarPort code."
+      } catch (error) {
+        if (error.status === 401) this.unauthorized()
+        else this.lookupError = error.message
+      } finally { this.checking = false }
+    },
     async sendLogs() {
-      if (await this.sendFeed.send(this.sendNote, this.sendDiscord)) this.sendNote = ""
+      if (!this.ticket) return
+      if (await this.sendFeed.send(this.sendNote, this.code)) this.sendNote = ""
     },
     reportDate(seconds) { return new Date(seconds * 1000).toLocaleString() },
     reportSize(bytes) { return `${(bytes / 1024).toFixed(1)} KiB` },
@@ -139,10 +158,15 @@ export const Logs = {
         <GxNotice v-if="logSend.fork" class="gx-starport-send__fork" tone="warn" title="This device is running a StarPilot fork">Custom forks may have changed StarPort or be out of date. Make sure your branch is up to date with StarPilotHQ before sending, or share the logs with your branch's maintainer or in the StarPilot Discord.</GxNotice>
         <section v-if="logSend.available" class="gx-card gx-panel gx-starport-send" aria-labelledby="gx-starport-send-title">
           <div class="gx-section__header"><i class="bi bi-send" aria-hidden="true"></i><span id="gx-starport-send-title" class="gx-section__title">Send StarPort logs</span></div>
-          <p class="gx-note">Only for StarPort issues. For anything else, ask in the Discord. Sends the same archive as Download all logs straight from the device. A short note about what happened is required.</p>
+          <p class="gx-note">Use the code from your Discord thread, or <a href="https://starpilot-log-relay.nathan-g-hubbard.workers.dev/report/galaxy/new/starport" target="_blank" rel="noopener">start a StarPort report</a>. Only support staff receive the ZIP.</p>
           <div class="gx-starport-send__row">
+            <input class="gx-field" style="font-size:16px" v-model="code" maxlength="24" aria-label="Discord request code" placeholder="Discord request code" autocapitalize="off" spellcheck="false" :disabled="checking || logSend.state === 'sending'" @input="ticket = ''; lookupError = ''" @keydown.enter="findReport">
+            <button class="gx-btn" :disabled="checking || !code.trim() || logSend.state === 'sending'" @click="findReport">{{ checking ? 'Finding report...' : 'Find report' }}</button>
+          </div>
+          <GxNotice v-if="lookupError" tone="danger">{{ lookupError }}</GxNotice>
+          <p v-if="ticket">{{ ticket }}</p>
+          <div v-if="ticket" class="gx-starport-send__row">
             <div class="gx-starport-send__field"><input class="gx-field" type="text" v-model="sendNote" :maxlength="messageLimit" placeholder="What happened?" aria-label="Note for the developer" :disabled="logSend.state === 'sending'" @keydown.enter="sendLogs"><span class="gx-starport-send__count" aria-live="polite">{{ sendNote.length }}/{{ messageLimit }}</span></div>
-            <input class="gx-field" type="text" v-model="sendDiscord" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Discord username (optional)" aria-label="Discord username for a follow-up" :disabled="logSend.state === 'sending'" @keydown.enter="sendLogs">
             <button type="button" class="gx-btn" :disabled="logSend.state === 'sending' || !sendNote.trim()" @click="sendLogs"><i class="bi bi-send" aria-hidden="true"></i><span>Send StarPort logs</span></button>
           </div>
           <GxState v-if="logSend.state === 'sending'" loading>{{ logSend.message || 'Sending logs' }}…</GxState>

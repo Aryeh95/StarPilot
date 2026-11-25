@@ -216,17 +216,16 @@ class SendHTTPTest(unittest.TestCase):
     status, body, _ = self.request("/api/starport/logs/send", headers={"Cookie": cookie})
     self.assertEqual((status, json.loads(body)["state"]), (200, "idle"))
 
-    status, body, _ = self.post({"message": "Black screen after unlock"}, cookie)
+    status, body, _ = self.post({"message": "Black screen after unlock", "code": "123456789abc"}, cookie)
     self.assertEqual((status, json.loads(body)["state"]), (202, "sending"))
-    self.job.start.assert_called_once_with("Black screen after unlock", "")
-    self.assertEqual(self.post({"message": "hi", "discord": "starfan_42"}, cookie)[0], 202)
-    self.job.start.assert_called_with("hi", "starfan_42")
+    self.job.start.assert_called_once_with("Black screen after unlock", "123456789abc")
+    self.assertEqual(self.post({"message": "hi", "discord": "starfan_42"}, cookie)[0], 400)
 
     self.assertEqual(self.post({"message": "hi", "extra": 1}, cookie)[0], 400)
     self.job.start.side_effect = SendRejected("Keep the message to 60 characters.")
-    self.assertEqual(self.post({"message": "x" * 61}, cookie)[0], 400)
+    self.assertEqual(self.post({"message": "x" * 61, "code": "123456789abc"}, cookie)[0], 400)
     self.job.start.side_effect = SendBusy("StarPort logs are already being sent.")
-    self.assertEqual(self.post({"message": "hi"}, cookie)[0], 409)
+    self.assertEqual(self.post({"message": "hi", "code": "123456789abc"}, cookie)[0], 409)
 
 
 

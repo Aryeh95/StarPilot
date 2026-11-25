@@ -10,7 +10,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from openpilot.common.utils import atomic_write
 from openpilot.starpilot.system.starport import identity as identity_store
@@ -242,6 +242,22 @@ def send(data: bytes, name: str, note: str, summary: dict, url: str | None = Non
     except OSError:
       return THREAD_CACHE_WARNING
   return None
+
+
+COMPANION_UPLOAD = "https://starpilot-log-relay.nathan-g-hubbard.workers.dev/report/galaxy/starport/upload"
+
+
+def send_companion(data, name, note, summary, *, discord):
+  import requests
+  if len(data) > DISCORD_FILE_LIMIT:
+    raise SendRejected("The archive exceeds the upload limit. Use Download all logs.")
+  response = requests.post(COMPANION_UPLOAD, data=data, timeout=(5, 60), allow_redirects=False,
+                           headers={"Content-Type": "application/zip", "X-Galaxy-Code": discord, "X-StarPort-Note": quote(note, safe="")})
+  if response.status_code == 410:
+    raise SendRejected("This code expired. Open your request in Discord for a fresh code.")
+  if response.status_code != 200 or response.json().get("sent") is not True:
+    raise SendRejected("Delivery could not be confirmed. Check your Discord thread before retrying.")
+  return "Check your Discord thread."
 
 
 class StarPortLogSender:

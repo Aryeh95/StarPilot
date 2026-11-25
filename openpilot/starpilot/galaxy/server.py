@@ -161,9 +161,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     nonlocal starport_log_sender_source
     with starport_log_sender_lock:
       if starport_log_sender_source is None:
-        from openpilot.starpilot.galaxy.starport_send import StarPortLogSender, device_summary
+        from openpilot.starpilot.galaxy.starport_send import COMPANION_UPLOAD, StarPortLogSender, send_companion
         source = starport_logs()
-        starport_log_sender_source = StarPortLogSender(source.bundle, summary=lambda: device_summary(source.directory))
+        starport_log_sender_source = StarPortLogSender(source.bundle, sender=send_companion, summary=dict, url=lambda: COMPANION_UPLOAD)
     return starport_log_sender_source
   software_source = software
   software_operations_source = software_operations
@@ -1850,10 +1850,13 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           code = payload['code']
           ticket = relay_post({'action': 'check', 'code': code})
           kind = ticket['kind']
-          if kind not in ('controller', 'connection'):
+          if kind not in ('controller', 'connection', 'starport'):
             raise ValueError()
           if payload['action'] == 'check':
             self.json(200, {'kind': kind, 'title': ticket['title']})
+            return
+          if kind == 'starport':
+            self.json(400, {'error': 'Open Logs & Diagnostics and choose StarPort Logs to send this report.'})
             return
           if kind == 'controller':
             from openpilot.starpilot.galaxy.controller_diagnostics import controller_capture
@@ -2636,16 +2639,16 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(401, {'error': 'Sign in to Galaxy'})
         return
       if path == '/api/starport/logs/send':
-        if type(payload) is not dict or set(payload) not in ({'message'}, {'message', 'discord'}):
-          self.json(400, {'error': 'Invalid StarPort log send request'})
-          return
         identity = self.settings_session()
         if identity is None:
           self.json(401, {'error': 'Sign in to Galaxy'})
           return
         from openpilot.starpilot.galaxy.starport_send import SendBusy, SendRejected
         try:
-          result = starport_log_sender().start(payload['message'], payload.get('discord', ''))
+          if (not isinstance(payload, dict) or set(payload) != {'message', 'code'} or not isinstance(payload['code'], str)
+              or not re.fullmatch(r'[0-9a-hjkmnp-tv-z]{12}', payload['code'])):
+            raise SendRejected('Enter the StarPort code from Discord.')
+          result = starport_log_sender().start(payload['message'], payload['code'])
         except SendRejected as error:
           self.json(400, {'error': str(error)})
         except SendBusy as error:

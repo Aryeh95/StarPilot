@@ -104,30 +104,32 @@ class LogRelayStager:
     self._lock = threading.Lock()
     self._thread: threading.Thread | None = None
     self._state = {"state": "idle", "message": "", "claimUrl": "", "kind": ""}
+    self._session = None
     self._fork: bool | None = None
 
   def _url(self) -> str:
     return self._stage_url() if callable(self._stage_url) else self._stage_url
 
-  def status(self) -> dict:
+  def status(self, session=None) -> dict:
     with self._lock:
       if self._fork is None:
         self._fork = not self._official()
       return {
-        **self._state,
+        **(self._state if session == self._session else {"state": "idle", "message": "", "claimUrl": "", "kind": ""}),
         "available": bool(self._url()),
         "fork": self._fork,
         "noteLimit": NOTE_LIMIT,
         "modelLimit": MODEL_LIMIT,
       }
 
-  def start(self, payload: object) -> dict:
+  def start(self, payload: object, session=None) -> dict:
     kind, platform, formatted_note = clean_stage_request(payload)
     if not self._url():
       raise StageRejected("Online log relay is unavailable. Use Download ZIP instead.")
     with self._lock:
       if self._thread is not None and self._thread.is_alive():
         raise StageBusy("Logs are already being prepared.")
+      self._session = session
       self._state = {"state": "staging", "message": "Collecting logs", "claimUrl": "", "kind": kind}
       self._thread = threading.Thread(
         target=self._run,
@@ -136,7 +138,7 @@ class LogRelayStager:
         daemon=True,
       )
       self._thread.start()
-    return self.status()
+    return self.status(session)
 
   def _set(self, **values) -> None:
     with self._lock:

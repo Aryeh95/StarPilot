@@ -266,6 +266,13 @@ class LogStageHTTPTest(unittest.TestCase):
 
     ready = wait_until(lambda: res if (res := self.request("/api/logs/stage")[1])["state"] == "ready" else None)
     self.assertEqual(ready["claimUrl"], VALID_CLAIM)
+    first_cookie, self.cookie = self.cookie, ""
+    _, _, self.cookie = self.request("/api/auth/session")
+    self.assertNotEqual(self.cookie, first_cookie)
+    self.assertEqual(self.request("/api/logs/stage")[1]["claimUrl"], "")
+    self.cookie = first_cookie
+    self.assertEqual(self.request("/api/logs/stage")[1]["claimUrl"], VALID_CLAIM)
+
 
 
 if __name__ == "__main__":

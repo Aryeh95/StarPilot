@@ -1038,7 +1038,11 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(200, result)
       elif path == '/api/logs/stage':
         if self.require_session():
-          self.json(200, log_stager().status())
+          identity = self.settings_session()
+          if identity is None:
+            self.json(401, {'error': 'Sign in to Galaxy'})
+          else:
+            self.json(200, log_stager().status(identity))
       elif path == '/api/starport/logs/send':
         if self.require_session():
           self.json(200, starport_log_sender().status())
@@ -1855,7 +1859,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           return
         from openpilot.starpilot.galaxy.log_relay_stage import StageBusy, StageRejected
         try:
-          result = log_stager().start(payload)
+          result = log_stager().start(payload, identity)
         except StageRejected as error:
           self.json(400, {'error': str(error)})
         except StageBusy as error:

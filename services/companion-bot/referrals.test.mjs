@@ -29,6 +29,7 @@ test('scan resolves the sample, skips old tickets, and sends a single private ca
   const guild='1387432184121393333',forum='1574085782967292000',review='1575000066366644244',sample='1574085782967292086';
   const bot='123456789123456789',user='987654321987654321';
   const fresh=String(BigInt(Date.now()+1000-1420070400000)<<22n);
+  let registrations=0;
   const posts=[];
   const env={DRIVING_SAMPLE_THREAD_ID:sample,COMPANION_REVIEW_THREAD_ID:review,DISCORD_BOT_TOKEN:'fixture',REPORT_MAINTAINER_ID:'524762496373096459',ANDROID_REPORT_MAINTAINER_ID:'420178305073938433',FIRESTAR_DISCORD_USER_ID:'123456789123456780'};
   const rows=new Map();
@@ -36,6 +37,14 @@ test('scan resolves the sample, skips old tickets, and sends a single private ca
   const thread=id=>({id,type:11,guild_id:guild,parent_id:forum});
   t.mock.method(globalThis,'fetch',async(url,opts)=>{
     const path=new URL(url).pathname.replace('/api/v10','');
+    if(path==='/applications/1574857862872703088/guilds/'+guild+'/commands'){
+      assert.equal(opts.method,'POST');
+      const payload=JSON.parse(opts.body);
+      if(payload.type===3)assert.equal(payload.name,'Refer to Companion Support');
+      else assert.deepEqual(payload,{name:'companion-staff-action',type:1,description:'Open Staff Actions privately for this Companion ticket'});
+      registrations++;
+      return Response.json({...payload,id:sample,guild_id:guild,application_id:'1574857862872703088'});
+    }
     if(opts.method==='POST'){posts.push({path,body:JSON.parse(opts.body)});return Response.json({id:'1'});}
     if(path==='/channels/'+sample)return Response.json(thread(sample));
     if(path==='/channels/'+forum)return Response.json({id:forum,type:15,guild_id:guild});
@@ -45,6 +54,7 @@ test('scan resolves the sample, skips old tickets, and sends a single private ca
     throw Error('Unexpected access '+path);
   });
   for(let i=0;i<3;i++)await referralStore('/referrals/scan',{},store,env);
+  assert.equal(registrations,2);
   assert.equal(posts.length,1);
   assert.ok(posts[0].body.flags & 4096);
   assert.deepEqual(posts[0].body.allowed_mentions,{parse:[],users:[env.REPORT_MAINTAINER_ID,env.ANDROID_REPORT_MAINTAINER_ID,env.FIRESTAR_DISCORD_USER_ID]});
@@ -98,6 +108,7 @@ test('Move closes only after registration and retries the same destination on a 
       assert.equal(opts.method,'POST');
       const notice=JSON.parse(opts.body);
       assert.ok(notice.components[0].components[0].content.includes(destination));
+      assert.match(notice.components[0].components[0].content,/no need to submit it again/);
       assert.deepEqual(notice.allowed_mentions,{parse:[]});
       if(!allowNotice)return new Response('',{status:403});
       notices++;
@@ -150,5 +161,85 @@ test('new linked ticket mentions the original reporter and both maintainers once
     for(const id of ids)assert.equal(text.split('<@'+id+'>').length,2);
     assert.ok(!text.includes(firestar));
     assert.ok(text.includes('Audio should continue.'));
+    assert.match(text,/reply in this thread/);
+  }
+});
+
+test('ambiguous referrals wait for Sage to pick the phone platform before creating a thread',async t=>{
+  const {referralStore}=await import('./referrals.mjs');
+  const source='1574085782967292086',review='1575000066366644244',guild='1387432184121393333';
+  const record={source,reporter:source,state:'pending',category:'Phone app',observed:'App disconnected'};
+  const rows=new Map([['source:'+source,{}],['report:'+source,record]]);
+  const store={get:k=>rows.get(k),put:(k,v)=>rows.set(k,v),transaction:fn=>fn(store)};
+  const env={DRIVING_SAMPLE_THREAD_ID:source,COMPANION_REVIEW_THREAD_ID:review,DISCORD_BOT_TOKEN:'test'};
+  const posts=[];
+  t.mock.method(globalThis,'fetch',async(url,options)=>{
+    if(url.endsWith('/channels/'+review))return Response.json({type:12,guild_id:guild});
+    posts.push(JSON.parse(options.body));
+    throw Error('lost acknowledgement');
+  });
+  const click=action=>referralStore('/referrals/action',{json:()=>({action,source,actor:source})},store,env);
+  assert.equal((await (await click('move')).json()).choosePlatform,true);
+  assert.equal(posts.length,0);
+  await click('android');
+  assert.equal(rows.get('report:'+source).platform,'android');
+  assert.equal(rows.get('report:'+source).state,'creating');
+  await click('move');
+  assert.equal(posts.length,1);
+});
+
+test('lost acknowledgements recover the existing review card and Companion ticket',async t=>{
+  const {referralStore}=await import('./referrals.mjs');
+  const source='1574085782967292086',review='1575000066366644244',guild='1387432184121393333',forum='1574085782967292000',bot='1574857862872703088',dest='1574999999999999999',support='1565235002734809168';
+  const key='report:'+source,title='A Companion report';
+  const record={state:'offering',category:'Phone app',source,reporter:source,observed:'Android app'};
+  const rows=new Map([['refer-command-v1',{id:dest}],['staff-action-command-v1',{id:dest}],['start',1],['source:'+source,{DRIVING_FORUM_ID:forum}],[key,record]]);
+  const store={get:k=>rows.get(k),put:(k,v)=>rows.set(k,v),transaction:fn=>fn(store)};
+  const env={COMPANION_REVIEW_THREAD_ID:review,DRIVING_SAMPLE_THREAD_ID:source,DISCORD_BOT_TOKEN:'test',REPORTS:{idFromName:k=>k,get:()=>({fetch:()=>new Response('',{status:503})})}};
+  t.mock.method(globalThis,'fetch',async(url,o)=>{
+    assert.equal(o.method,'GET');
+    const path=new URL(url).pathname.replace('/api/v10','');
+    if(path==='/users/@me')return Response.json({id:bot});
+    if(path==='/channels/'+review)return Response.json({type:12,guild_id:guild});
+    if(path.endsWith('/threads/active'))return Response.json({threads:[{parent_id:forum,id:source},{parent_id:support,id:dest,name:title,owner_id:bot}]});
+    const link='(https://discord.com/channels/'+guild+'/'+source+')';
+    if(path==='/channels/'+review+'/messages')return Response.json([{author:{id:bot},id:dest,content:'[Open driving report]'+link}]);
+    if(path==='/channels/'+dest+'/messages/'+dest)return Response.json({author:{id:bot},content:'[Original driving report]'+link});
+    throw Error(path);
+  });
+  await referralStore('/referrals/scan',{},store,env);
+  assert.equal(rows.get(key).reviewMessage,dest);
+  rows.set(key,{...record,title,state:'creating',platform:'android',reportKind:'connection',created:1});
+  await assert.rejects(referralStore('/referrals/action',{json:()=>({action:'move',source,actor:source})},store,env),/register/);
+  assert.equal(rows.get(key).destination,dest);
+  assert.equal(rows.get(key).platform,'android');
+});
+
+test('review thread replies are shared from acknowledgement through final card; driving thread commands stay private',async t=>{
+  const guild='1387432184121393333',review='1575000066366644244',source='1574085782967292086';
+  const edits=[];
+  t.mock.method(globalThis,'fetch',async(url,options)=>{
+    assert.equal(options.method,'PATCH');
+    edits.push(JSON.parse(options.body));
+    return Response.json({});
+  });
+  const env={COMPANION_REVIEW_THREAD_ID:review,DRIVING_SAMPLE_THREAD_ID:source,
+    REPORTS:{idFromName:name=>name,get:name=>({fetch:async()=>Response.json(name==='companion-bot-setup'?{id:'sage'}:{message:'Choose a platform',choosePlatform:true})})}};
+  for(const inReview of [true,false]){
+    const click={type:inReview?3:2,guild_id:guild,channel_id:inReview?review:source,member:{roles:['sage'],user:{id:source}},
+      application_id:'app',token:'fixture',data:{custom_id:'refer:move:'+source}};
+    let done;
+    const ack=await (await referralInteraction(click,env,{waitUntil:job=>{done=job;}})).json();
+    assert.equal(ack.type,5);
+    assert.equal(Boolean(ack.data?.flags & 64),!inReview);
+    await done;
+    assert.equal(Boolean(edits.at(-1).flags & 64),!inReview);
+    assert.deepEqual(edits.at(-1).allowed_mentions,{parse:[]});
+    assert.equal(edits.at(-1).components[0].components[1].components.length,2);
+    click.member.roles=[];
+    const denied=await (await referralInteraction(click,env,{})).json();
+    assert.equal(denied.type,4);
+    assert.equal(Boolean(denied.data.flags & 64),!inReview);
+    assert.match(JSON.stringify(denied.data),/requires StarPilot Sage/);
   }
 });

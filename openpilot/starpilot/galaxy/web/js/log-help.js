@@ -412,8 +412,14 @@ export const LogHelp = {
           <BluetoothNotice v-if="bluetooth" feature="ZIP downloads">Direct log sending from the comma remains available.</BluetoothNotice>
 
           <div v-if="claimReady" class="gx-log-help__ready gx-stack" role="status">
-            <strong>Logs uploaded from your comma</strong>
-            <p class="gx-note">Continue to StarPilot Support to sign in with Discord and post to a new or existing thread. Only staff receive the diagnostic ZIP.</p>
+            <strong>Almost done: your report is not posted yet</strong>
+            <p>Your comma uploaded the logs. Finish on Discord to post them:</p>
+            <ol class="gx-log-help__claim-steps">
+              <li>Tap <strong>Continue on Discord support</strong>. It may already be open in a new tab.</li>
+              <li>If Discord asks, sign in and tap <strong>Authorize</strong>.</li>
+              <li>Under <strong>Post to</strong>, pick a new or existing thread, then tap <strong>Post report</strong>.</li>
+            </ol>
+            <p class="gx-note">Only staff receive the diagnostic ZIP.</p>
             <div class="gx-actions">
               <a class="gx-btn" :href="stage.claimUrl" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i><span>Continue on Discord support</span></a>
               <button type="button" class="gx-btn gx-btn--tonal" @click="resetStage">Send another report</button>
@@ -425,6 +431,7 @@ export const LogHelp = {
               <i class="bi bi-info-circle" aria-hidden="true"></i>
               <div class="gx-stack">
                 <strong>What we need</strong>
+                <p>Before collecting fresh logs, park and update your comma to the latest testing build from StarPilotHQ/StarPilot. Try the connection again.</p>
                 <p>{{ currentTopic.whatWeNeed }}</p>
                 <p v-if="currentTopic.extraHint" class="gx-note">{{ currentTopic.extraHint }}</p>
               </div>
@@ -475,6 +482,7 @@ export const LogHelp = {
               </template>
             </div>
 
+            <p v-if="!bluetooth" class="gx-note">Comma offline? Save the ZIP on your phone and send it when you have internet. Include the branch and version you captured.</p>
             <p v-if="stage.available && !canSend && stage.state !== 'staging'" class="gx-note">{{ missingHint }}</p>
             <GxState v-if="stage.state === 'staging'" loading>{{ stage.message || 'Uploading logs' }}…</GxState>
             <GxNotice v-if="stage.state === 'failed' || stage.error || zipError" tone="danger">{{ stage.error || stage.message || zipError }}</GxNotice>

@@ -101,10 +101,10 @@ test('closing archives after the status card and reopening restores the same thr
   });
   const act=(action,value,id)=>caseAction(store,env,{channel:'4',user:'1',platform:'ios',actor:'3',action,value,interaction:id});
   await act('status','Closed','1');
-  assert.deepEqual(events,[{applied_tags:['42','1565237052524466207']},0x359467,{archived:true}]);
+  assert.deepEqual(events,[{applied_tags:['42','1565237052524466207']},0x3498db,{archived:true}]);
   assert.match((await (await act('working',null,'2')).json()).message,/closed or archived/);
   await act('status','Open','3');
-  assert.deepEqual(events.slice(3),[{applied_tags:['42','1565236988913913887'],archived:false},0x3498db]);
+  assert.deepEqual(events.slice(3),[{applied_tags:['42','1565236988913913887'],archived:false},0xe74c3c]);
 });
 
 test('the overview is staff-only and reads archived tickets without posting',async t=>{
@@ -133,4 +133,149 @@ test('asking a question pings only the reporter and offers feedback',async t=>{
   assert.deepEqual(message.allowed_mentions,{parse:[],users:['1']});
   assert.match(JSON.stringify(message.components),/Which build/);
   assert.match(JSON.stringify(message.components),/case:1:ios:feedback:4/);
+});
+
+test('deployment keeps the commit, testing adds the build, and the forum title follows the ticket lifecycle',async t=>{
+  const records=new Map([['thread:4',{platform:'ios'}]]);
+  const storage={get:key=>records.get(key),put:(key,val)=>records.set(key,val),transaction:fn=>fn(storage)};
+  const thread={id:'4',type:11,parent_id:supportForum,name:'🟠 Sentry preview',applied_tags:[],thread_metadata:{}};
+  const posts=[];
+  t.mock.method(globalThis,'fetch',async(url,options)=>{
+    if(options.method==='PATCH')Object.assign(thread,JSON.parse(options.body));
+    if(options.method==='POST')posts.push(JSON.parse(options.body));
+    return Response.json(thread);
+  });
+  const run=(action,extra={})=>caseAction(storage,env,{channel:'4',user:'1',actor:'3',platform:'ios',action,interaction:action,...extra});
+  const commit='https://github.com/StarPilotHQ/StarPilot/commit/1234abc';
+  await run('awaiting',{commit});
+  assert.equal(thread.name,'⚪ Sentry preview');
+  assert.deepEqual(posts.at(-1).allowed_mentions.users,[]);
+  await run('testing',{build:'2.0 (332)',value:'Check the preview.'});
+  assert.equal(thread.name,'🟣 Sentry preview');
+  assert.deepEqual(posts.at(-1).allowed_mentions.users,['1']);
+  assert.ok(JSON.stringify(posts.at(-1)).includes(commit));
+  assert.ok(JSON.stringify(posts.at(-1)).includes('2.0 (332)'));
+  await run('investigate');
+  assert.equal(thread.name,'🔴 Sentry preview');
+  await run('fulfilled',{actor:'1'});
+  assert.equal(thread.name,'🟢 Sentry preview');
+});
+
+test('slash command opens only an ephemeral staff menu without posting to the ticket',async t=>{
+  const {privateStaffCommand}=await import('./case-actions.mjs');
+  const i={guild_id:'1387432184121393333',channel_id:'4',application_id:'9',token:'fixture',member:{roles:['6']}};
+  const edits=[];
+  t.mock.method(globalThis,'fetch',async(url,options)=>{
+    if(options.method==='PATCH'){
+      assert.ok(url.endsWith('/messages/@original'));
+      edits.push(JSON.parse(options.body));
+      return Response.json({});
+    }
+    assert.equal(options.method,'GET');
+    if(url.endsWith('/channels/4'))return Response.json({id:'4',type:11,parent_id:supportForum,applied_tags:[]});
+    assert.ok(url.endsWith('/channels/4/messages/4'));
+    return Response.json({channel_id:'4',author:{id:'9'},components:caseButtons('1','ios')});
+  });
+  for(const roles of [['6'],[]]){
+    i.member.roles=roles;
+    let job;
+    const deferred=await privateStaffCommand(i,env,{waitUntil:p=>{job=p;}}).json();
+    assert.equal(deferred.data.flags,64);
+    await job;
+    assert.ok(edits.at(-1).flags & 64);
+    assert.match(JSON.stringify(edits.at(-1)),roles.length?/case:1:ios:pick:4/:/requires the StarPilot Sage role/);
+  }
+});
+
+test('a renamed, previously moved ticket opens its private menu even without Discord message history',async t=>{
+  const {privateStaffCommand}=await import('./case-actions.mjs');
+  const {referralStore}=await import('./referrals.mjs');
+  const channel='1574999999999999999',reporter='1574000000000000000';
+  const entries=new Map([['report:old',{destination:channel,reporter,platform:'ios',state:'moved'}]]);
+  let lists=0;
+  const store={get:k=>entries.get(k),put:(k,v)=>entries.set(k,v),list:()=>{lists++;return new Map(entries);}};
+  const runtime={REPORTS:{idFromName:k=>k,get:k=>({fetch:(url,init)=>k==='companion-bot-setup'
+    ?Response.json({id:'sage'}):referralStore(new URL(url).pathname,new Request(url,init),store,{})})}};
+  const i={guild_id:'1387432184121393333',channel_id:channel,channel:{parent_id:supportForum},application_id:'9',token:'fixture',member:{roles:['sage']}};
+  t.mock.method(globalThis,'fetch',async(url,o)=>{
+    assert.equal(o.method,'PATCH');
+    assert.ok(url.endsWith('/messages/@original'));
+    const card=JSON.parse(o.body);
+    assert.ok(card.flags & 64);
+    assert.ok(JSON.stringify(card).includes('case:'+reporter+':ios:pick:'+channel));
+    return Response.json({});
+  });
+  for(let n=0;n<2;n++){
+    let done;
+    assert.equal((await privateStaffCommand(i,runtime,{waitUntil:p=>{done=p;}}).json()).data.flags,64);
+    await done;
+  }
+  assert.equal(lists,1);
+});
+
+test('old webhook tickets use their verified report reference or exact saved thread URL',async t=>{
+  const {privateStaffCommand}=await import('./case-actions.mjs');
+  const guild='1387432184121393333', channel='1574999999999999999', user='1574000000000000000';
+  const ref='C80EA1A0-6ED0-4F9C-880C-E91C83F04049';
+  const threadURL='https://discord.com/channels/'+guild+'/'+channel+'/'+channel;
+  let readable=true, edits=0;
+  const runtime={DISCORD_BOT_TOKEN:'test',REPORTS:{idFromName:k=>k,get:k=>({fetch:async(url,init)=>{
+    if(k==='companion-bot-setup')return Response.json({id:'sage'});
+    if(k==='driving-referral-review')return new Response(null,{status:404});
+    const body=JSON.parse(init.body);
+    if(k===user){
+      assert.equal(body.reference,ref);
+      return Response.json({threadURL});
+    }
+    assert.equal(k,'dashboard:ios');
+    return Response.json(body.cursor?{reports:[{userID:user,platform:'ios',threadURL}],cursor:null}:
+      {reports:[{userID:'3',platform:'ios',threadURL:threadURL.replace(channel,'123')}],cursor:'page2'});
+  }})}};
+  t.mock.method(globalThis,'fetch',async(url,opts)=>{
+    if(opts.method==='PATCH'){
+      assert.ok(url.endsWith('/messages/@original'));
+      const card=JSON.parse(opts.body);
+      assert.ok(card.flags & 64);
+      assert.ok(JSON.stringify(card).includes('case:'+user+':ios:pick:'+channel));
+      edits++;
+      return Response.json({});
+    }
+    assert.equal(opts.method,'GET');
+    if(url.endsWith('/channels/'+channel))return Response.json({id:channel,parent_id:supportForum,type:11,applied_tags:[]});
+    if(!readable)return new Response(null,{status:403});
+    return Response.json({channel_id:channel,author:{id:'2'},content:'Report from <@'+user+'> (Nate)\nReference: '+ref+'\n\nTesting'});
+  });
+  for(readable of [true,false]){
+    let job;
+    const ack=await privateStaffCommand({guild_id:guild,channel_id:channel,application_id:'9',member:{roles:['sage']}},runtime,{waitUntil:p=>{job=p;}}).json();
+    assert.equal(ack.data.flags,64);
+    await job;
+  }
+  assert.equal(edits,2);
+});
+
+test('comma testing adds the official branch instruction only to the comma testing request',async t=>{
+  const {galaxyLogSteps,updateComma}=await import('./galaxy-log-request.mjs');
+  for(const kind of ['connection','controller','starport']){
+    const steps=galaxyLogSteps({kind,platform:'android'});
+    assert.ok(steps[0].startsWith(updateComma));
+    assert.match(steps.at(-1),/offline.*branch and version/);
+  }
+  const posts=[];
+  t.mock.method(globalThis,'fetch',async(url,options)=>{
+    if(options.method==='POST'){posts.push(JSON.parse(options.body));return Response.json({id:'8'});}
+    return Response.json({id:'4',type:11,parent_id:supportForum,applied_tags:[]});
+  });
+  const records=new Map([['thread:4',{platform:'ios'}]]);
+  const store={get:k=>records.get(k),put:(k,v)=>records.set(k,v),transaction:fn=>fn(store)};
+  for(const selected of ['testing','commaTesting']){
+    const pick=interaction('pick:4','3');
+    pick.data.values=[selected];
+    const modal=(await (await caseInteraction(pick,env)).json()).data;
+    assert.equal(modal.custom_id,'case:1:ios:'+selected+':4');
+    await caseAction(store,env,{action:'testing',commaTesting:selected==='commaTesting',platform:'ios',channel:'4',user:'1',actor:'3',value:'Verify the fix.',build:'2.0 (332)',interaction:selected});
+    const card=JSON.stringify(posts.at(-1));
+    assert.equal(card.includes(updateComma),selected==='commaTesting');
+    assert.ok(card.includes('2.0 (332)'));
+  }
 });

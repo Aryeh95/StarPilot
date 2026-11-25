@@ -135,10 +135,10 @@ export class StarPortLogSend {
     }
   }
 
-  async send(message, code = "") {
+  async send(message, discord = "") {
     if (!this.active) return false
     const text = String(message ?? "").trim()
-    const normalized = String(code).replace(/[\s-]/g, "").toLowerCase()
+    const handle = String(discord ?? "").trim()
     if (!text) {
       this.publish({ error: "Add a short note about what happened." })
       return false
@@ -147,15 +147,11 @@ export class StarPortLogSend {
       this.publish({ error: `Keep the message to ${MESSAGE_LIMIT} characters.` })
       return false
     }
-    if (!/^[0-9a-hjkmnp-tv-z]{12}$/.test(normalized)) {
-      this.publish({ error: "Enter the StarPort code from Discord." })
-      return false
-    }
     const generation = ++this.generation
     this.queuePoll(false)
     this.publish({ state: "sending", message: "Starting", error: "" })
     try {
-      const body = await this.call({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, code: normalized }) }, generation)
+      const body = await this.call({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(handle ? { message: text, discord: handle } : { message: text }) }, generation)
       if (body === null) return false
       this.apply(body)
       return true

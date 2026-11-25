@@ -135,4 +135,3 @@ try {
 }
 
 console.log("LogHelp UI routing, LogStageClient, and captureZip checks passed")
-

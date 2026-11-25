@@ -196,4 +196,3 @@ class LogRelayStager:
       self._set(state="failed", claimUrl="", message=str(error)[:400])
     except Exception:
       self._set(state="failed", claimUrl="", message="Your comma could not reach the internet. Use Download ZIP instead.")
-

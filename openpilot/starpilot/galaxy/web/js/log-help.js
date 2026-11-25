@@ -526,4 +526,3 @@ export const LogHelp = {
     </section>
   `,
 }
-

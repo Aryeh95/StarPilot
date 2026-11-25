@@ -155,4 +155,3 @@ const assert = require('node:assert/strict')
   console.log('Passed LogHelp browser flow, responsiveness, touch targets, themes, and staging checks.')
   await browser.close()
 })().catch(error => { console.error(error); process.exit(1) })
-

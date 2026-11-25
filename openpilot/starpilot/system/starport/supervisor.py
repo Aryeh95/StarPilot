@@ -26,8 +26,9 @@ from openpilot.starpilot.system.starport.bootstrap import MODERN_MAJOR, NAMES, B
 from openpilot.starpilot.system.starport.bugsink_report import PairingAttempt
 from openpilot.starpilot.system.starport.event_log import EventLog
 from openpilot.starpilot.system.starport.frame_source import (DEFAULT_PATH as DEFAULT_FRAME_PATH, FLAG_ASYNC_READBACK, FLAG_NV12,
-                                                                  FORMAT_NV12, FrameRequest)
+                                                                  FORMAT_NV12, FrameRequest, frame_brightness)
 from openpilot.starpilot.system.starport.projection_control import DEFAULT_CONTROL_SOCKET, NATIVE_FOCUS
+from openpilot.starpilot.system.starport.reachability import _open_projection, _tcp_failure_kind
 from openpilot.starpilot.system.starport.radio_watch import (RADIO_CHANGE_WINDOW as RADIO_CHANGE_WINDOW,
                                                            RADIO_CHECK_INTERVAL as RADIO_CHECK_INTERVAL, SharedRadioWatch)
 from openpilot.starpilot.system.starport.touch import DEFAULT_TOUCH_SOCKET, TouchEvent
@@ -69,31 +70,6 @@ REPORTED_SETTINGS = ("connection", "usb_mode", "view", "encoder", "fps", "bitrat
                      "async_readback", "wifi_interface", "dedicated_wifi_interface", "verify_head_unit", "version_status",
                      "rfcomm_channel", "phone_class", "auto_connect", "allow_hevc", "keyframe_test", "tall_hevc",
                      "unacked_video", "patient_tcp", "wired_handsfree", "head_unit_experiments", "head_unit_experiment_rules")
-
-
-def _open_projection(ip: str, ports: list[int], advertised: int, local_ip: str, log) -> socket.socket:
-  error: OSError | None = None
-  for port in ports:
-    try:
-      sock = socket.create_connection((ip, port), timeout=5.0, source_address=(local_ip, 0) if local_ip else None)
-    except OSError as failure:
-      error = error or failure  # the first port's failure decides how patiently to retry
-      continue
-    if port != advertised:
-      log("tcp_port_fallback", advertised=advertised, port=port)
-    return sock
-  assert error is not None
-  raise error
-
-
-def _tcp_failure_kind(error: OSError) -> str:
-  if isinstance(error, (TimeoutError, socket.timeout)):
-    return "timeout"
-  if isinstance(error, ConnectionRefusedError):
-    return "refused"
-  if getattr(error, "errno", None) in (errno.ENETUNREACH, errno.EHOSTUNREACH, errno.ENETDOWN, errno.EHOSTDOWN):
-    return "unreachable"
-  return "other"
 
 
 HANDSFREE_UUID = "0000111e-0000-1000-8000-00805f9b34fb"
@@ -2229,6 +2205,8 @@ class Supervisor:
     unavailable: dict[str, bytes] = {}
     recoveries: list[float] = []  # when the hardware encoder was reopened, this session
     encode_peak = 0.0
+    sizes = {"bytes": 0, "frames": 0, "max": 0, "keyframe": 0}  # encoded sizes over each logged 30 s window
+    last_frame = None
     wait_for_frame = False
     audio = getattr(session, "audio", None)
     nav = getattr(session, "nav", None)
@@ -2295,6 +2273,12 @@ class Supervisor:
             data, keyframe = encoded
             encode_peak = max(encode_peak, encoder.last_encode_ms)
             session.send_frame(data, frame.captured_ns // 1000, keyframe=keyframe)
+            sizes["bytes"] += len(data)
+            sizes["frames"] += 1
+            sizes["max"] = max(sizes["max"], len(data))
+            if keyframe:
+              sizes["keyframe"] = len(data)
+            last_frame = frame
             if source.view == "car":
               source.source.mark_sent(frame.captured_ns)
             sent_at = time.monotonic()
@@ -2330,7 +2314,11 @@ class Supervisor:
                  "uptime_s": round(now - started), "frames_from_view": source.frames, "wifi_dbm": watch.wifi_dbm}
         self._set(stats=stats)
         if int(now - started) % 30 == 0:
-          self.log("stats", **{**device_health.sample(getattr(watch.lease, "interface", "wlan0")), **stats})
+          picture = {"frame_bytes_avg": sizes["bytes"] // sizes["frames"] if sizes["frames"] else None,
+                     "frame_bytes_max": sizes["max"], "keyframe_bytes": sizes["keyframe"] or None,
+                     **frame_brightness(last_frame, session.mode)}
+          self.log("stats", **{**device_health.sample(getattr(watch.lease, "interface", "wlan0")), **stats, **picture})
+          sizes.update(bytes=0, frames=0, max=0)
           encode_peak = 0.0  # the peak covers each logged 30 s window
           if audio is not None:
             audio.reset_peaks()

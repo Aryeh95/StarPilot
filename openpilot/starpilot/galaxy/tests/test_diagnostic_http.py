@@ -1,4 +1,3 @@
-from unittest.mock import Mock, patch
 """Authenticated diagnostics over the same local and remote HTTP handler."""
 
 import http.client
@@ -9,6 +8,7 @@ import threading
 import time
 from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock, patch
 
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.log_relay_stage import LogRelayStager

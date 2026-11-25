@@ -152,13 +152,14 @@ export const Logs = {
       </template>
       <section v-else-if="path === '/logs/starport' && mode === 'local'" class="gx-settings gx-starport-logs" aria-labelledby="gx-starport-logs-title">
         <header class="gx-settings__header gx-page-header"><div><h2 id="gx-starport-logs-title">StarPort Logs</h2>
-          <p>The last 20 connection sessions, newest first. The archive includes every session, a readable report for each, StarPort settings, the car view's renderer logs, and a snapshot of the device (Wi-Fi, Bluetooth and kernel logs, build, CPU load). Hardware addresses are masked.</p></div><WikiHelp /></header>
+          <p>Recent StarPort connection sessions and support logs.</p></div><WikiHelp /></header>
         <BluetoothNotice v-if="bluetooth" feature="Log downloads">Log summaries remain available.</BluetoothNotice>
-        <div class="gx-settings__controls gx-actions"><a v-if="!bluetooth" class="gx-btn" :href="bundleUrl()" download><i class="bi bi-file-earmark-zip" aria-hidden="true"></i><span>Download all logs</span><span class="gx-starport-logs__format">ZIP</span></a><button type="button" class="gx-btn gx-btn--tonal" @click="starportFeed.load()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i><span>Refresh</span></button></div>
         <GxNotice v-if="logSend.fork" class="gx-starport-send__fork" tone="warn" title="This device is running a StarPilot fork">Custom forks may have changed StarPort or be out of date. Make sure your branch is up to date with StarPilotHQ before sending, or share the logs with your branch's maintainer or in the StarPilot Discord.</GxNotice>
         <section v-if="logSend.available" class="gx-card gx-panel gx-starport-send" aria-labelledby="gx-starport-send-title">
           <div class="gx-section__header"><i class="bi bi-send" aria-hidden="true"></i><span id="gx-starport-send-title" class="gx-section__title">Send StarPort logs</span></div>
-          <p class="gx-note">Use the code from your Discord thread, or <a href="https://starpilot-log-relay.nathan-g-hubbard.workers.dev/report/galaxy/new/starport" target="_blank" rel="noopener">start a StarPort report</a>. Only support staff receive the ZIP.</p>
+          <a class="gx-btn" href="https://starpilot-log-relay.nathan-g-hubbard.workers.dev/report/galaxy/new/starport" target="_blank" rel="noopener noreferrer">Start a StarPort report</a>
+          <details class="gx-starport-code"><summary>Enter a Discord request code</summary>
+          <p class="gx-note">Paste your code to find the report. Only support staff receive the logs.</p>
           <div class="gx-starport-send__row">
             <input class="gx-field" style="font-size:16px" v-model="code" maxlength="24" aria-label="Discord request code" placeholder="Discord request code" autocapitalize="off" spellcheck="false" :disabled="checking || logSend.state === 'sending'" @input="ticket = ''; lookupError = ''" @keydown.enter="findReport">
             <button class="gx-btn" :disabled="checking || !code.trim() || logSend.state === 'sending'" @click="findReport">{{ checking ? 'Finding report...' : 'Find report' }}</button>
@@ -173,8 +174,14 @@ export const Logs = {
           <GxNotice v-else-if="logSend.state === 'sent'" tone="success">{{ logSend.message }}</GxNotice>
           <GxNotice v-else-if="logSend.state === 'failed'" tone="danger">{{ logSend.message }}</GxNotice>
           <GxNotice v-if="logSend.error" tone="danger">{{ logSend.error }}</GxNotice>
+          </details>
         </section>
 
+        <details v-if="!bluetooth"><summary>Manual ZIP download</summary>
+          <p>The last 20 connection sessions, newest first. The archive includes every session, a readable report for each, StarPort settings, the car view's renderer logs, and a snapshot of the device (Wi-Fi, Bluetooth and kernel logs, build, CPU load). Hardware addresses are masked.</p>
+          <a v-if="!bluetooth" class="gx-btn" :href="bundleUrl()" download><i class="bi bi-file-earmark-zip" aria-hidden="true"></i><span>Download all logs</span><span class="gx-starport-logs__format">ZIP</span></a>
+        </details>
+        <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="starportFeed.load()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i><span>Refresh</span></button></div>
         <GxState v-if="starportLogs.status === 'loading'" loading>Loading StarPort logs…</GxState>
         <GxNotice v-else-if="starportLogs.status === 'unavailable'" tone="danger">{{ starportLogs.error || 'StarPort logs are unavailable.' }}</GxNotice>
         <GxState v-else-if="starportLogs.status === 'ready' && !starportLogs.sessions.length">No StarPort sessions have been logged yet.</GxState>

@@ -132,6 +132,12 @@ class StarPilotLateralLayout(_SettingsPage):
         visible=aol_on,
       ),
       SettingRow(
+        "PauseLateralOnOverride", "toggle", tr_noop("Pause Steering on Driver Override"),
+        subtitle=tr_noop("Pause steering while you're manually steering. Steering resumes when you release the wheel."),
+        get_state=lambda: p.get_bool("PauseLateralOnOverride"),
+        set_state=lambda s: p.put_bool("PauseLateralOnOverride", s),
+      ),
+      SettingRow(
         "PauseLateralSpeed", "value", tr_noop("Pause Lateral Below"),
         subtitle=tr_noop("Pause steering below the set speed."),
         get_value=lambda: f"{p.get_int('PauseLateralSpeed')} mph",

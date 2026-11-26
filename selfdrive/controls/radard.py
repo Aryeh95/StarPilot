@@ -96,6 +96,8 @@ class Track:
     self.K_K = kalman_params.K
     self.kf = KF1D([[v_lead], [0.0]], self.K_A, self.K_C, self.K_K)
 
+    self.leadLeft = False
+    self.leadRight = False
     self.leadTrackID = 0
 
     # deceleration history for the adjacent-lane stopped-vehicle detector
@@ -168,14 +170,39 @@ class Track:
     }
 
   def potential_adjacent_lead(self, left: bool, standstill: bool, model_data: capnp._DynamicStructReader):
-    if standstill or self.vLead < 1 or self.leadTrackID == self.identifier:
+    should_update_cached_leads = model_data.meta.laneChangeState != LaneChangeState.laneChangeStarting
+
+    if standstill or self.vLeadK < 1 or self.leadTrackID == self.identifier:
+      if should_update_cached_leads:
+        self.leadLeft = False
+        self.leadRight = False
       return False
 
-    if left:
-      left_lane = np.interp(self.dRel, model_data.laneLines[1].x, model_data.laneLines[1].y)
-      return -self.yRel < left_lane
-    right_lane = np.interp(self.dRel, model_data.laneLines[2].x, model_data.laneLines[2].y)
-    return -self.yRel > right_lane
+    if not should_update_cached_leads:
+      return self.leadLeft if left else self.leadRight
+
+    # radar distances are measured from the radar, lane lines from the model frame ~1.5m behind it
+    model_distance = self.dRel + RADAR_TO_CAMERA
+
+    if len(model_data.laneLines) >= 4 and len(model_data.position.x) > 0:
+      far_left_lane = np.interp(model_distance, model_data.laneLines[0].x, model_data.laneLines[0].y)
+      left_lane = np.interp(model_distance, model_data.laneLines[1].x, model_data.laneLines[1].y)
+      right_lane = np.interp(model_distance, model_data.laneLines[2].x, model_data.laneLines[2].y)
+      far_right_lane = np.interp(model_distance, model_data.laneLines[3].x, model_data.laneLines[3].y)
+
+      in_range = model_distance < model_data.position.x[-1]
+      lead_left = bool(far_left_lane < -self.yRel < left_lane and in_range)
+      lead_right = bool(right_lane < -self.yRel < far_right_lane and in_range)
+    else:
+      left_lane = np.interp(model_distance, model_data.laneLines[1].x, model_data.laneLines[1].y)
+      right_lane = np.interp(model_distance, model_data.laneLines[2].x, model_data.laneLines[2].y)
+      lead_left = bool(-self.yRel < left_lane)
+      lead_right = bool(-self.yRel > right_lane)
+
+    self.leadLeft = lead_left
+    self.leadRight = lead_right
+
+    return lead_left if left else lead_right
 
   def is_adjacent_stopped(self, model_data: capnp._DynamicStructReader):
     """A neighbouring-lane vehicle that was seen moving and has now come to rest.
@@ -202,8 +229,9 @@ class Track:
       return False
 
     model_y = -self.yRel
-    left_lane = np.interp(self.dRel, model_data.laneLines[1].x, model_data.laneLines[1].y)
-    right_lane = np.interp(self.dRel, model_data.laneLines[2].x, model_data.laneLines[2].y)
+    model_distance = self.dRel + RADAR_TO_CAMERA
+    left_lane = np.interp(model_distance, model_data.laneLines[1].x, model_data.laneLines[1].y)
+    right_lane = np.interp(model_distance, model_data.laneLines[2].x, model_data.laneLines[2].y)
     return bool(model_y < left_lane or model_y > right_lane)
 
   def potential_low_speed_lead(self, v_ego: float):

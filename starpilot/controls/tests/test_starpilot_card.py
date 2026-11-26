@@ -1962,3 +1962,23 @@ def test_favorite_traffic_mode_action_is_consumed_when_not_active(monkeypatch, t
 
   assert card.traffic_mode_enabled is False
   assert card._favorite_traffic_mode_counter == 1
+
+
+def test_pause_lateral_on_override_toggle(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="hyundai"), SimpleNamespace(alternativeExperience=0))
+  car_state = make_car_state(available=True, enabled=True)
+  car_state.steeringPressed = True
+  sm = make_sm()
+
+  ret_off = card.update(car_state, SimpleNamespace(distancePressed=False), sm, make_toggles(pause_lateral_on_override=False))
+  assert ret_off.pauseLateral is False
+
+  ret_on = card.update(car_state, SimpleNamespace(distancePressed=False), sm, make_toggles(pause_lateral_on_override=True))
+  assert ret_on.pauseLateral is True
+
+  car_state.steeringPressed = False
+  ret_released = card.update(car_state, SimpleNamespace(distancePressed=False), sm, make_toggles(pause_lateral_on_override=True))
+  assert ret_released.pauseLateral is False

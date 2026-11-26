@@ -34,6 +34,7 @@ THEME_KEY_CONFIG = {
 
 COLOR_PRESETS = ["Stock", "#FFFFFF", "#178644", "#3B82F6", "#E63956", "#8B5CF6", "#F59E0B"]
 CAMERA_VIEWS = ["Auto", "Driver", "Standard", "Wide"]
+LEAD_MARKER_STYLES = [tr_noop("Standard"), tr_noop("Compact"), tr_noop("Minimal")]
 
 # Keys are the int values stored in DeveloperSidebarMetric{1..7}; values are the
 # human-readable labels shown in both the row value and the picker dialog.
@@ -178,6 +179,7 @@ class StarPilotAppearanceLayout(_SettingsPage):
         hud_on = lambda: self._params.get_bool("CustomUI")
         dev_metrics_on = lambda: self._params.get_bool("DeveloperMetrics")
         dev_sidebar_on = lambda: self._params.get_bool("DeveloperSidebar")
+        lead_info_on = lambda: self._params.get_bool("LeadInfo")
 
         # ═══ 1. Model & Path Visualization ═══
         self._model_rows = [
@@ -353,6 +355,11 @@ class StarPilotAppearanceLayout(_SettingsPage):
                        subtitle="",
                        get_state=lambda: self._params.get_bool("HideLeadMarker"),
                        set_state=lambda s: self._params.put_bool("HideLeadMarker", s)),
+            SettingRow("LeadMarkerStyle", "value", tr_noop("Lead Marker Style"),
+                       subtitle=tr_noop("Choose how large the lead vehicle chevrons appear."),
+                       get_value=self._get_lead_marker_style_display,
+                       on_click=self._show_lead_marker_style_selector,
+                       enabled=lambda: not self._params.get_bool("HideLeadMarker")),
             SettingRow("HideChangingLanesBanner", "toggle", tr_noop("Hide Changing Lanes Banner"),
                        subtitle="",
                        get_state=lambda: self._params.get_bool("HideChangingLanesBanner"),
@@ -430,8 +437,27 @@ class StarPilotAppearanceLayout(_SettingsPage):
             SettingRow("LeadInfo", "toggle", tr_noop("Lead Vehicle Metrics"),
                        subtitle="",
                        get_state=lambda: self._params.get_bool("LeadInfo"),
-                       set_state=lambda s: self._params.put_bool("LeadInfo", s),
-                       enabled=ol),
+                       set_state=lambda s: self._params.put_bool("LeadInfo", s)),
+            SettingRow("LeadMetricsDistance", "toggle", tr_noop("Lead Distance"),
+                       subtitle="",
+                       get_state=lambda: self._params.get_bool("LeadMetricsDistance", default=True),
+                       set_state=lambda s: self._params.put_bool("LeadMetricsDistance", s),
+                       visible=lead_info_on),
+            SettingRow("LeadMetricsDesired", "toggle", tr_noop("Desired Follow Distance"),
+                       subtitle="",
+                       get_state=lambda: self._params.get_bool("LeadMetricsDesired", default=True),
+                       set_state=lambda s: self._params.put_bool("LeadMetricsDesired", s),
+                       visible=lambda: lead_info_on() and ol()),
+            SettingRow("LeadMetricsSpeed", "toggle", tr_noop("Lead Speed"),
+                       subtitle="",
+                       get_state=lambda: self._params.get_bool("LeadMetricsSpeed", default=True),
+                       set_state=lambda s: self._params.put_bool("LeadMetricsSpeed", s),
+                       visible=lead_info_on),
+            SettingRow("LeadMetricsTimeGap", "toggle", tr_noop("Time Gap"),
+                       subtitle="",
+                       get_state=lambda: self._params.get_bool("LeadMetricsTimeGap", default=True),
+                       set_state=lambda s: self._params.put_bool("LeadMetricsTimeGap", s),
+                       visible=lead_info_on),
             SettingRow("RadarTracksUI", "toggle", tr_noop("Radar Point Display"),
                        subtitle="",
                        get_state=lambda: self._params.get_bool("RadarTracksUI"),
@@ -614,6 +640,23 @@ class StarPilotAppearanceLayout(_SettingsPage):
                 self._params.put_int("CameraView", idx)
 
         dialog = MultiOptionDialog(tr("Camera View"), CAMERA_VIEWS, CAMERA_VIEWS[current], callback=on_select)
+        gui_app.push_widget(dialog)
+
+    def _get_lead_marker_style_display(self):
+        idx = self._params.get_int("LeadMarkerStyle", return_default=True, default=0)
+        idx = max(0, min(len(LEAD_MARKER_STYLES) - 1, idx))
+        return tr(LEAD_MARKER_STYLES[idx])
+
+    def _show_lead_marker_style_selector(self):
+        current_idx = self._params.get_int("LeadMarkerStyle", return_default=True, default=0)
+        current_idx = max(0, min(len(LEAD_MARKER_STYLES) - 1, current_idx))
+        options = [tr(style) for style in LEAD_MARKER_STYLES]
+
+        def on_select(res):
+            if res == DialogResult.CONFIRM and dialog.selection in options:
+                self._params.put_int("LeadMarkerStyle", options.index(dialog.selection))
+
+        dialog = MultiOptionDialog(tr("Lead Marker Style"), options, options[current_idx], callback=on_select)
         gui_app.push_widget(dialog)
 
     # ── Color selectors ──

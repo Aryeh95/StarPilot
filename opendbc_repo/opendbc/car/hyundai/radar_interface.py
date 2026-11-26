@@ -51,6 +51,11 @@ RADAR_TRACK_CONFIGS = {
 
 
 def get_radar_track_config(car_fingerprint, flags: int = 0) -> RadarTrackConfig | None:
+  if car_fingerprint == CAR.KIA_EV6:
+    bus = 1 if (flags & HyundaiFlags.CANFD_CAMERA_SCC) else 0
+    return RadarTrackConfig(GV70_RADAR_START_ADDR, GV70_RADAR_MSG_COUNT, "ev6_210", bus=bus,
+                            frequency=20, expected_length=32, dbc_name=GV70_RADAR_DBC)
+
   if (car_fingerprint == CAR.HYUNDAI_PALISADE_2023 and
       flags & HyundaiFlags.CAN_CANFD_BLENDED and flags & HyundaiFlags.CANFD_LKA_STEERING):
     return RadarTrackConfig(GV70_RADAR_START_ADDR, GV70_RADAR_MSG_COUNT, "palisade_210", bus=0,
@@ -78,7 +83,7 @@ def radar_tracks_available(radar_config: RadarTrackConfig | None, fingerprint) -
   if radar_config is None:
     return False
 
-  if radar_config.radar_type in ("gv70_210", "palisade_210"):
+  if radar_config.radar_type in ("ev6_210", "gv70_210", "palisade_210"):
     return all(fingerprint[radar_config.bus].get(addr) == radar_config.expected_length
                for addr in range(radar_config.start_addr, radar_config.start_addr + radar_config.msg_count))
 
@@ -241,10 +246,18 @@ class RadarInterface(RadarInterfaceBase):
             del self.pts[track_key]
         continue
 
-      if radar_type in ("gv70_210", "palisade_210"):
+      if radar_type in ("ev6_210", "gv70_210", "palisade_210"):
         for i in ("1", "2"):
           track_key = addr * 2 + int(i) - 1
-          valid = msg[f"{i}_STATE"] in (3, 4)
+          state = int(msg[f"{i}_STATE"])
+          if radar_type == "ev6_210":
+            if state == 0:
+              # compact-dialect radars leave STATE zero and use the compressed lifecycle field
+              state = {0: 0, 1: 1, 2: 3, 3: 4}[int(msg[f"{i}_STATE_ALT"])]
+            # 3 = measured, 4 = coasted/predicted; 1 = stationary, 2 = moving (0 = unknown excluded for fusion)
+            valid = state in (3, 4) and int(msg[f"{i}_MOTION_STATE"]) in (1, 2)
+          else:
+            valid = state in (3, 4)
           if valid:
             pt = self.pts.get(track_key)
             if pt is None:

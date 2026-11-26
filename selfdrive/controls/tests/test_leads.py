@@ -8,10 +8,14 @@ import pytest
 from opendbc.car.toyota.values import CAR as TOYOTA
 from opendbc.car.honda.values import CAR as HONDA
 from openpilot.selfdrive.test.process_replay import replay_process_with_name
+from openpilot.selfdrive.controls.lib.desire_helper import LaneChangeState
 from openpilot.selfdrive.controls.radard import (
   DT_MDL,
   HONDA_BOSCH_A_RADAR_TS,
+  RADAR_TO_CAMERA,
+  KalmanParams,
   RadarD,
+  Track,
   POST_STANDSTILL_RADAR_LEAD_PERSISTENCE_FRAMES,
   post_standstill_radar_lead_is_urgent,
   g90_low_speed_radar_lead_sane,
@@ -191,3 +195,38 @@ class TestLeads:
     failures = [not state.valid for state in states]
 
     assert len(states) == 0 or all(failures)
+
+  def test_potential_adjacent_lead_model_frame_offset_and_lane_change_cache(self):
+    model = log.ModelDataV2.new_message()
+    model.init('laneLines', 4)
+    xs = [0.0, 10.0, 20.0, 30.0]
+    model.position.x = xs
+    # Curve lane lines sharply right at x > 20 so radar-frame vs model-frame assignment differs
+    for idx, ys in enumerate((
+      [-5.5, -5.5, -5.5, -5.5],
+      [-1.8, -1.8, -3.5, -3.5],
+      [1.8, 1.8, 0.2, 0.2],
+      [5.5, 5.5, 4.0, 4.0],
+    )):
+      model.laneLines[idx].x = xs
+      model.laneLines[idx].y = ys
+
+    track = Track(7, 20.0, KalmanParams(DT_MDL))
+    # At dRel = 19.0, model_distance = 19.0 + RADAR_TO_CAMERA > 20.0 where laneLines[2] is 0.2 (so -yRel=1.0 is right lane)
+    track.update(d_rel=19.0, y_rel=-1.0, v_rel=0.0, v_lead=20.0, measured=True)
+    assert RADAR_TO_CAMERA > 1.0
+    assert track.potential_adjacent_lead(left=False, standstill=False, model_data=model)
+    assert not track.potential_adjacent_lead(left=True, standstill=False, model_data=model)
+    assert track.leadRight
+    assert not track.leadLeft
+
+    # Freeze cached leadLeft/leadRight while laneChangeStarting
+    model.meta.laneChangeState = LaneChangeState.laneChangeStarting
+    track.update(d_rel=5.0, y_rel=0.0, v_rel=0.0, v_lead=20.0, measured=True)
+    assert track.potential_adjacent_lead(left=False, standstill=False, model_data=model)
+    assert not track.potential_adjacent_lead(left=True, standstill=False, model_data=model)
+
+    # Resumes updating and clears cached flags once laneChangeStarting ends or track slows down
+    model.meta.laneChangeState = LaneChangeState.off
+    assert not track.potential_adjacent_lead(left=False, standstill=False, model_data=model)
+    assert not track.leadRight

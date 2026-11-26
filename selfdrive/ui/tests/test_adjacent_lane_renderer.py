@@ -85,3 +85,48 @@ def test_adjacent_path_keeps_a_single_valid_side(monkeypatch, lane_width_left, l
 
   assert renderer._adjacent_path_vertices[expected_side].size >= 4
   assert renderer._adjacent_path_vertices[1 - expected_side].size == 0
+
+
+def test_place_lead_label_rect_pushes_outward_and_drops_when_out_of_bounds():
+  Rect = lambda x, y, w, h: SimpleNamespace(x=x, y=y, width=w, height=h)
+  primary = Rect(900.0, 500.0, 200.0, 120.0)
+  placed = [primary]
+
+  # Left adjacent label colliding with primary is pushed outward to the left
+  left_rect = Rect(820.0, 510.0, 140.0, 80.0)
+  placed_left, displaced_left = model_renderer.ModelRenderer._place_lead_label_rect(
+    left_rect, line_height=34.0, margin=8.5, bounds_x=0.0, bounds_w=2160.0, placed_rects=placed,
+  )
+  assert displaced_left is True
+  assert placed_left.x + placed_left.width <= primary.x
+
+  # Right label with no horizontal room falls back to dropping down a line
+  right_edge = Rect(2000.0, 500.0, 150.0, 120.0)
+  colliding = Rect(2020.0, 510.0, 140.0, 80.0)
+  dropped, displaced_drop = model_renderer.ModelRenderer._place_lead_label_rect(
+    colliding, line_height=34.0, margin=8.5, bounds_x=0.0, bounds_w=2160.0, placed_rects=[right_edge],
+  )
+  assert displaced_drop is True
+  assert dropped.y > colliding.y
+
+
+def test_lead_marker_style_sizing_and_minimal_glow():
+  renderer = object.__new__(model_renderer.ModelRenderer)
+  rect = SimpleNamespace(x=0.0, y=0.0, width=2160.0, height=1080.0)
+
+  renderer._lead_marker_style = 0
+  standard = renderer._update_lead_vehicle(20.0, 0.0, (1080.0, 540.0), rect)
+  renderer._lead_marker_style = 1
+  compact = renderer._update_lead_vehicle(20.0, 0.0, (1080.0, 540.0), rect)
+  renderer._lead_marker_style = 2
+  minimal = renderer._update_lead_vehicle(20.0, 0.0, (1080.0, 540.0), rect)
+
+  assert len(standard.glow) == 3
+  assert len(compact.glow) == 3
+  assert minimal.glow == []
+  assert len(minimal.chevron) == 3
+  standard_w = standard.chevron[0][0] - standard.chevron[2][0]
+  compact_w = compact.chevron[0][0] - compact.chevron[2][0]
+  minimal_w = minimal.chevron[0][0] - minimal.chevron[2][0]
+  assert compact_w < standard_w
+  assert minimal_w < compact_w

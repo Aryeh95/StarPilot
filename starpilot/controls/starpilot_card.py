@@ -592,7 +592,7 @@ class StarPilotCard:
     starpilotCarState.forceCoast = self.force_coast
     starpilotCarState.pulseAndGlide = self.pulse_and_glide
     starpilotCarState.isParked = carState.gearShifter == GearShifter.park
-    starpilotCarState.pauseLateral = self.pause_lateral
+    starpilotCarState.pauseLateral = self.pause_lateral or (bool(getattr(starpilot_toggles, "pause_lateral_on_override", False)) and carState.steeringPressed)
     starpilotCarState.pauseLongitudinal = self.pause_longitudinal
     starpilotCarState.trafficModeEnabled = self.traffic_mode_enabled
 

@@ -1404,6 +1404,7 @@ class StarPilotVariables:
     toggle.pause_lateral_below_speed = self.get_value("PauseLateralSpeed", cast=float, condition=quality_of_life_lateral, conversion=speed_conversion)
     toggle.pause_lateral_below_signal = self.get_value("PauseLateralOnSignal", condition=toggle.pause_lateral_below_speed != 0)
     toggle.pause_lateral_signal_delay = self.get_value("LateralResumeDelay", cast=float, condition=toggle.pause_lateral_below_signal, default=0.0, min=0.0, max=5.0)
+    toggle.pause_lateral_on_override = self.get_value("PauseLateralOnOverride")
 
     quality_of_life = self.get_value("QOLLongitudinal")
     quality_of_life_longitudinal = toggle.openpilot_longitudinal and quality_of_life

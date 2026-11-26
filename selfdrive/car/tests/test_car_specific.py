@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
-from cereal import car
+from cereal import car, log
+from opendbc.car import DT_CTRL
 from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
 
 from openpilot.selfdrive.car.car_specific import CarSpecificEvents
@@ -56,3 +57,37 @@ def test_kia_ray_ev_allows_stock_cruise_to_enable_controls():
 
     assert captured["pcm_enable"] is True
     assert captured["ignore_cruise_state"] is ignore_cruise_state
+
+
+def test_override_hold_suppresses_temporary_steer_fault_alerts():
+  cp = make_cp(brand="hyundai", op_long=False, pcm_cruise=True)
+  handler = CarSpecificEvents(cp)
+  cs_prev = car.CarState.new_message()
+  cs = car.CarState.new_message()
+  cs.gearShifter = car.CarState.GearShifter.drive
+  cs.cruiseState.available = True
+  cs.cruiseState.enabled = True
+  cs.steeringPressed = True
+
+  # Prime override_hold during steering override
+  events = handler.create_common_events(cs, cs_prev, pcm_enable=False)
+  assert log.OnroadEvent.EventName.steerOverride in events.names
+
+  # Release steering slightly before temporary steer fault clears: silent alert is suppressed
+  cs.steeringPressed = False
+  cs.steerFaultTemporary = True
+  events = handler.create_common_events(cs, cs_prev, pcm_enable=False)
+  assert log.OnroadEvent.EventName.steerTempUnavailableSilent not in events.names
+  assert log.OnroadEvent.EventName.steerTempUnavailable not in events.names
+
+  # Once override_hold expires, a lingering fault stays silent via the latch (no disengage)
+  handler.override_hold = 0
+  events = handler.create_common_events(cs, cs_prev, pcm_enable=False)
+  assert log.OnroadEvent.EventName.steerTempUnavailableSilent in events.names
+
+  # Fresh fault with no prior override still raises the normal steerTempUnavailable warning
+  fresh_handler = CarSpecificEvents(cp)
+  fresh_handler.steering_unpressed = int(2.0 / DT_CTRL)
+  fresh_handler.silent_steer_warning = False
+  events = fresh_handler.create_common_events(cs, cs_prev, pcm_enable=False)
+  assert log.OnroadEvent.EventName.steerTempUnavailable in events.names

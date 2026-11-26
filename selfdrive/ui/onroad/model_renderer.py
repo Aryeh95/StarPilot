@@ -70,6 +70,8 @@ class ModelRenderer(Widget):
     self._road_edge_stds = np.zeros(2, dtype=np.float32)
     self._lead_vehicles = [LeadVehicle(), LeadVehicle()]
     self._adjacent_lead_vehicles = [LeadVehicle(), LeadVehicle()]
+    self._lead_marker_style = 0
+    self._lead_label_rects: list[rl.Rectangle] = []
     self._path_offset_z = HEIGHT_INIT[0]
 
     # Adjacent path vertices (left, right)
@@ -141,6 +143,9 @@ class ModelRenderer(Widget):
     lead_one = radar_state.leadOne if radar_state else None
 
     self._lead_info_enabled = self._params.get_bool("LeadInfo")
+    marker_style = max(0, min(2, self._params.get_int("LeadMarkerStyle", return_default=True, default=0)))
+    style_changed = marker_style != self._lead_marker_style
+    self._lead_marker_style = marker_style
     self._use_rainbow = self._params.get_bool('RainbowPath', default=False)
     self._use_accel_path = self._params.get_bool('AccelerationPath', default=True)
     self._is_metric = self._params.get_bool('IsMetric')
@@ -163,13 +168,12 @@ class ModelRenderer(Widget):
       self._update_model(lead_one, path_x_array)
       self._transform_dirty = False
 
-    if render_lead_indicator and (sm.updated['radarState'] or model_updated or transform_dirty):
+    if render_lead_indicator and (sm.updated['radarState'] or model_updated or transform_dirty or style_changed):
       self._update_leads(radar_state, path_x_array)
       if sm.valid.get("starpilotRadarState", False):
         self._update_adjacent_leads(sm["starpilotRadarState"], path_x_array)
 
-    self._lead_text_rects = []
-    self._adjacent_lead_text_rects = []
+    self._lead_label_rects = []
 
     # Draw elements
     self._draw_lane_lines()
@@ -367,14 +371,19 @@ class ModelRenderer(Widget):
       fill_alpha = min(fill_alpha, 255)
 
     # Calculate size and position
-    sz = np.clip((25 * 30) / (d_rel / 3 + 30), 15.0, 30.0) * 2.35
+    # lead marker style: 0 = standard, 1 = compact (~2/3 size, lighter glow), 2 = minimal (small, no glow)
+    marker_style = getattr(self, "_lead_marker_style", 0)
+    style_scale = 0.65 if marker_style == 1 else (0.45 if marker_style == 2 else 1.0)
+    sz = np.clip((25 * 30) / (d_rel / 3 + 30), 15.0, 30.0) * 2.35 * style_scale
     x = np.clip(point[0], 0.0, rect.width - sz / 2)
     y = min(point[1], rect.height - sz * 0.6)
 
-    g_xo = sz / 5
-    g_yo = sz / 10
-
-    glow = [(x + (sz * 1.35) + g_xo, y + sz + g_yo), (x, y - g_yo), (x - (sz * 1.35) - g_xo, y + sz + g_yo)]
+    if marker_style == 2:
+      glow = []
+    else:
+      g_xo = sz / 8 if marker_style == 1 else sz / 5
+      g_yo = sz / 16 if marker_style == 1 else sz / 10
+      glow = [(x + (sz * 1.35) + g_xo, y + sz + g_yo), (x, y - g_yo), (x - (sz * 1.35) - g_xo, y + sz + g_yo)]
     chevron = [(x + (sz * 1.25), y + sz), (x, y), (x - (sz * 1.25), y + sz)]
 
     return LeadVehicle(glow=glow, chevron=chevron, fill_alpha=int(fill_alpha))
@@ -484,33 +493,23 @@ class ModelRenderer(Widget):
     lead_color = get_theme_color("LeadMarker", rl.Color(201, 34, 49, 255))
     leads = [radar_state.leadOne, radar_state.leadTwo]
 
-    # Threshold for Lead 1
-    threshold = self._params.get_int("LeadDetectionProbability")
-    if threshold is None or threshold == 0:
-      threshold = self._params.get_int("LeadDetectionThreshold")
-    if threshold is None or threshold == 0:
-      threshold = 50
-    prob_threshold = threshold / 100.0 if threshold > 1.0 else threshold
-
     for i, lead in enumerate(self._lead_vehicles):
-      if not lead.glow or not lead.chevron:
+      if not lead.chevron:
         continue
 
-      # Choose color
-      if i == 0 and radar_state.leadOne and radar_state.leadOne.status:
-        if radar_state.leadOne.modelProb >= prob_threshold:
-          color = lead_color
-        else:
-          color = rl.WHITE
+      # Lead source indicator: green = radar-measured track, orange = vision-estimated fallback
+      if i < len(leads) and leads[i] and leads[i].status:
+        color = rl.Color(46, 204, 113, 255) if getattr(leads[i], "radar", False) else rl.Color(255, 165, 0, 255)
       else:
         color = lead_color
 
-      rl.draw_triangle_fan(lead.glow, len(lead.glow), rl.Color(218, 202, 37, 255))
+      if lead.glow:
+        rl.draw_triangle_fan(lead.glow, len(lead.glow), rl.Color(218, 202, 37, 255))
       rl.draw_triangle_fan(lead.chevron, len(lead.chevron), with_alpha(color, lead.fill_alpha))
 
       # Draw metrics if enabled
       if self._lead_info_enabled and i < len(leads) and leads[i] and leads[i].status:
-        self._draw_lead_metrics(False, lead.chevron, leads[i])
+        self._draw_lead_metrics(False, lead.chevron, leads[i], color)
 
   def _update_adjacent_leads(self, starpilot_radar_state, path_x_array):
     self._adjacent_lead_vehicles = [LeadVehicle(), LeadVehicle()]
@@ -546,17 +545,55 @@ class ModelRenderer(Widget):
 
     for idx, lead_data, color in leads_to_draw:
       lead = self._adjacent_lead_vehicles[idx]
-      if not lead.glow or not lead.chevron:
+      if not lead.chevron:
         continue
 
-      rl.draw_triangle_fan(lead.glow, len(lead.glow), rl.Color(218, 202, 37, 255))
+      if lead.glow:
+        rl.draw_triangle_fan(lead.glow, len(lead.glow), rl.Color(218, 202, 37, 255))
       rl.draw_triangle_fan(lead.chevron, len(lead.chevron), with_alpha(color, lead.fill_alpha))
 
       # Draw metrics if enabled
       if self._lead_info_enabled:
-        self._draw_lead_metrics(True, lead.chevron, lead_data)
+        self._draw_lead_metrics(True, lead.chevron, lead_data, color)
 
-  def _draw_lead_metrics(self, adjacent, chevron, lead_data):
+  @staticmethod
+  def _rects_collide(a, b) -> bool:
+    return (a.x < b.x + b.width and a.x + a.width > b.x and
+            a.y < b.y + b.height and a.y + a.height > b.y)
+
+  @classmethod
+  def _place_lead_label_rect(cls, padded_rect, line_height: float, margin: float,
+                             bounds_x: float, bounds_w: float, placed_rects: list):
+    def collides(rect) -> bool:
+      return any(cls._rects_collide(rect, placed) for placed in placed_rects)
+
+    if not placed_rects or not collides(padded_rect):
+      return padded_rect, False
+
+    rect_cls = type(padded_rect)
+    anchor_x = placed_rects[0].x + placed_rects[0].width / 2.0
+    push_left = (padded_rect.x + padded_rect.width / 2.0) < anchor_x
+
+    shifted = rect_cls(padded_rect.x, padded_rect.y, padded_rect.width, padded_rect.height)
+    for _ in range(3):
+      if not collides(shifted):
+        break
+      for placed in placed_rects:
+        if cls._rects_collide(shifted, placed):
+          dx = (placed.x - margin - (shifted.x + shifted.width)) if push_left else (placed.x + placed.width + margin - shifted.x)
+          shifted = rect_cls(shifted.x + dx, shifted.y, shifted.width, shifted.height)
+
+    if shifted.x >= bounds_x and (shifted.x + shifted.width) <= (bounds_x + bounds_w) and not collides(shifted):
+      return shifted, True
+
+    dropped = rect_cls(padded_rect.x, padded_rect.y, padded_rect.width, padded_rect.height)
+    for _ in range(4):
+      if not collides(dropped):
+        break
+      dropped = rect_cls(dropped.x, dropped.y + line_height + margin, dropped.width, dropped.height)
+    return dropped, True
+
+  def _draw_lead_metrics(self, adjacent, chevron, lead_data, marker_color=None):
     is_metric = ui_state.is_metric
     use_si_metrics = ui_state.starpilot_toggles.get("UseSiMetrics", False)
 
@@ -578,67 +615,93 @@ class ModelRenderer(Widget):
     distance_string = f"{round(lead_distance * distance_conversion)}"
     speed_string = f"{round(lead_speed * speed_conversion_metrics)}"
 
+    show_distance = self._params.get_bool("LeadMetricsDistance", default=True)
+    show_desired = self._params.get_bool("LeadMetricsDesired", default=True) and not adjacent and self._longitudinal_control
+    show_speed = self._params.get_bool("LeadMetricsSpeed", default=True)
+    show_time_gap = self._params.get_bool("LeadMetricsTimeGap", default=True) and not adjacent
+
     text_lines = []
-    if adjacent:
-      text_lines.append(f"{distance_string} {lead_distance_unit}")
-      text_lines.append(f"{speed_string}{lead_speed_unit}")
-    else:
-      if self._longitudinal_control:
+    if show_distance or show_desired:
+      dist_parts = []
+      if show_distance:
+        dist_parts.append(f"{distance_string} {lead_distance_unit}")
+      if show_desired:
         plan = ui_state.sm["starpilotPlan"]
         desired_follow_distance = float(plan.desiredFollowDistance) if plan and plan.desiredFollowDistance > 0 else 0.0
         desired_distance = max(0, round(desired_follow_distance * distance_conversion))
-        text_lines.append(f"{distance_string} {lead_distance_unit} (Desired: {desired_distance})")
-      else:
-        text_lines.append(f"{distance_string} {lead_distance_unit}")
+        dist_parts.append(f"(Desired: {desired_distance})" if show_distance else f"Desired: {desired_distance}")
+      text_lines.append(" ".join(dist_parts))
 
+    if show_speed:
       text_lines.append(f"{speed_string}{lead_speed_unit}")
 
+    if show_time_gap:
       v_ego = max(ui_state.sm["carState"].vEgo, 0.0)
       time_gap = lead_distance / max(v_ego, 1.0)
-      text_lines.append(f"{time_gap:.2f} seconds")
+      text_lines.append(f"{time_gap:.2f} s")
 
-    from openpilot.system.ui.lib.application import gui_app, FontWeight
-    from openpilot.selfdrive.ui.onroad.starpilot.path import _draw_text_with_outline
-    font = gui_app.font(FontWeight.SEMI_BOLD)
-    font_size = 36
-    line_height = font_size + 2
-
-    max_text_width = 0.0
-    for line in text_lines:
-      sz = measure_text_cached(font, line, font_size)
-      if sz.x > max_text_width:
-        max_text_width = sz.x
-
-    centerX = chevron[1][0]
-    startY = max(chevron[0][1], chevron[2][1]) + line_height + 5
-
-    x_margin = max_text_width * 0.1
-    y_margin = line_height * 0.1
-
-    rect_x = centerX - max_text_width / 2 - x_margin
-    rect_y = startY - line_height - y_margin
-    rect_w = max_text_width + 2 * x_margin
-    rect_h = len(text_lines) * line_height + 2 * y_margin
-    text_rect = rl.Rectangle(rect_x, rect_y, rect_w, rect_h)
-
-    collision = False
-    for r in self._lead_text_rects + self._adjacent_lead_text_rects:
-      if rl.check_collision_recs(text_rect, r):
-        collision = True
-        break
-
-    if collision:
+    if not text_lines:
       return
 
-    if adjacent:
-      self._adjacent_lead_text_rects.append(text_rect)
-    else:
-      self._lead_text_rects.append(text_rect)
+    from openpilot.system.ui.lib.application import FontWeight
+    from openpilot.selfdrive.ui.onroad.starpilot.path import _draw_text_with_outline
+    font = gui_app.font(FontWeight.SEMI_BOLD)
+    font_size = 32 if adjacent else 40
+    line_height = font_size + 2
 
-    for i, line in enumerate(text_lines):
-      sz = measure_text_cached(font, line, font_size)
-      line_x = centerX - sz.x / 2
-      line_y = startY + (i * line_height)
+    line_widths = [measure_text_cached(font, line, font_size).x for line in text_lines]
+    max_text_width = max(line_widths)
+    text_height = len(text_lines) * line_height
+    margin = line_height / 4.0
+
+    chevron_center_x = chevron[1][0]
+    chevron_bottom_y = max(chevron[0][1], chevron[2][1])
+
+    text_rect = rl.Rectangle(
+      chevron_center_x - max_text_width / 2.0,
+      chevron_bottom_y + 5.0,
+      max_text_width,
+      text_height,
+    )
+    padded_rect = rl.Rectangle(
+      text_rect.x - margin,
+      text_rect.y - margin,
+      text_rect.width + 2.0 * margin,
+      text_rect.height + 2.0 * margin,
+    )
+    padded_rect, displaced = self._place_lead_label_rect(
+      padded_rect,
+      line_height,
+      margin,
+      float(self._rect.x),
+      float(self._rect.width),
+      self._lead_label_rects,
+    )
+    text_rect = rl.Rectangle(
+      padded_rect.x + margin,
+      padded_rect.y + margin,
+      padded_rect.width - 2.0 * margin,
+      padded_rect.height - 2.0 * margin,
+    )
+    self._lead_label_rects.append(padded_rect)
+
+    if displaced and marker_color is not None:
+      line_color = rl.Color(
+        min(255, int(marker_color.r * 1.6)),
+        min(255, int(marker_color.g * 1.6)),
+        min(255, int(marker_color.b * 1.6)),
+        200,
+      )
+      rl.draw_line_ex(
+        rl.Vector2(chevron_center_x, chevron_bottom_y),
+        rl.Vector2(text_rect.x + text_rect.width / 2.0, text_rect.y),
+        3.0,
+        line_color,
+      )
+
+    for i, (line, line_w) in enumerate(zip(text_lines, line_widths, strict=True)):
+      line_x = text_rect.x + (text_rect.width - line_w) / 2.0
+      line_y = text_rect.y + i * line_height
       _draw_text_with_outline(line, line_x, line_y, font, font_size)
 
   def _draw_radar_tracks(self):

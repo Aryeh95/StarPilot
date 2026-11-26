@@ -63,6 +63,7 @@ class CarSpecificEvents:
     self.CP = CP
 
     self.steering_unpressed = 0
+    self.override_hold = 0
     self.low_speed_alert = False
     self.gm_low_speed_alert_shown = False
     self.no_steer_warning = False
@@ -289,14 +290,27 @@ class CarSpecificEvents:
 
     # Handle permanent and temporary steering faults
     self.steering_unpressed = 0 if CS.steeringPressed else self.steering_unpressed + 1
+    # Hold an "overriding" flag for a short tail after the driver stops applying torque.
+    # Hyundai (and others) raise a temporary EPS fault when the driver overrides, and it
+    # can linger a beat past the press or trip just under the steeringPressed threshold;
+    # this keeps such faults classified as override-related so they don't alert or disengage.
+    if CS.steeringPressed:
+      self.override_hold = int(2.5 / DT_CTRL)
+    elif self.override_hold > 0:
+      self.override_hold -= 1
+
     if CS.steerFaultTemporary:
       if CS.steeringPressed and (not CS_prev.steerFaultTemporary or self.no_steer_warning):
         self.no_steer_warning = True
       else:
         self.no_steer_warning = False
 
-        # if the user overrode recently, show a less harsh alert
-        if self.silent_steer_warning or CS.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
+        # override-induced fault: the driver is steering, no alert needed at all
+        if self.override_hold > 0:
+          self.silent_steer_warning = True
+        # if the user overrode recently, show a less harsh alert; a genuine fault with no
+        # driver input (override_hold expired) still raises the normal warning
+        elif self.silent_steer_warning or CS.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
           self.silent_steer_warning = True
           events.add(EventName.steerTempUnavailableSilent)
         else:

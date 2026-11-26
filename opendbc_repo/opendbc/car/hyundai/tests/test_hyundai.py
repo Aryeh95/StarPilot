@@ -244,8 +244,9 @@ class TestHyundaiFingerprint:
   def test_ev6_init_captures_factory_adrv_0x51(self, monkeypatch):
     fingerprint = gen_empty_fingerprint()
     fingerprint[CanBus(None, fingerprint).CAM][0x50] = 16
-    radar_config = get_radar_track_config(CAR.KIA_EV6)
-    fingerprint[radar_config.bus][radar_config.start_addr] = radar_config.expected_length
+    radar_config = get_radar_track_config(CAR.KIA_EV6, HyundaiFlags.CANFD_LKA_STEERING)
+    for addr in range(radar_config.start_addr, radar_config.start_addr + radar_config.msg_count):
+      fingerprint[radar_config.bus][addr] = radar_config.expected_length
     car_fw = [CarParams.CarFw(ecu=Ecu.adas, fwVersion=b"", address=0x730, brand="hyundai")]
     CP = CarInterface.get_params(CAR.KIA_EV6, fingerprint, car_fw, True, False, False, get_test_toggles())
     factory = bytes.fromhex("6b657d090900e1ff000000000020ffff00000000000000000800000010000000")
@@ -442,7 +443,6 @@ class TestHyundaiFingerprint:
       (CAR.HYUNDAI_IONIQ_5, MRR30_RADAR_START_ADDR),
       (CAR.HYUNDAI_IONIQ_5_PE, MRR35_RADAR_START_ADDR),
       (CAR.HYUNDAI_IONIQ_5_N, MRR30_RADAR_START_ADDR),
-      (CAR.KIA_EV6, MRR30_RADAR_START_ADDR),
       (CAR.KIA_EV6_2025, MRR30_RADAR_START_ADDR),
       (CAR.GENESIS_GV60_EV_1ST_GEN, MRR30_RADAR_START_ADDR),
       (CAR.HYUNDAI_KONA_EV_2ND_GEN, MRR35_RADAR_START_ADDR),
@@ -860,6 +860,67 @@ class TestHyundaiFingerprint:
       radar.rcp.vl[addr]["1_STATE"] = 0
       radar.rcp.vl[addr]["2_STATE"] = 0
     assert not radar._update(set()).points
+
+  def test_kia_ev6_native_210_radar_tracks(self):
+    ev6_hda1_config = get_radar_track_config(CAR.KIA_EV6, HyundaiFlags.CANFD_CAMERA_SCC)
+    ev6_hda2_config = get_radar_track_config(CAR.KIA_EV6)
+    assert ev6_hda1_config.radar_type == "ev6_210"
+    assert ev6_hda1_config.bus == 1
+    assert ev6_hda1_config.frequency == 20
+    assert ev6_hda1_config.expected_length == 32
+    assert ev6_hda1_config.dbc_name == GV70_RADAR_DBC
+    assert ev6_hda2_config.bus == 0
+    assert ev6_hda2_config.frequency == 20
+
+    # HDA1 requires full 0x210..0x21f bank on bus 1
+    hda1_fp = gen_empty_fingerprint()
+    hda1_fp[1][0x210] = 32
+    assert CarInterface.get_params(CAR.KIA_EV6, hda1_fp, [], False, False, False, None).radarUnavailable
+    for addr in range(0x210, 0x220):
+      hda1_fp[1][addr] = 32
+    hda1_cp = CarInterface.get_params(CAR.KIA_EV6, hda1_fp, [], False, False, False, None)
+    assert hda1_cp.flags & HyundaiFlags.CANFD_CAMERA_SCC
+    assert not hda1_cp.radarUnavailable
+
+    # HDA2 requires full 0x210..0x21f bank on bus 0
+    hda2_fp = gen_empty_fingerprint()
+    hda2_fp[CanBus(None, hda2_fp).CAM][0x50] = 16
+    for addr in range(0x210, 0x220):
+      hda2_fp[0][addr] = 32
+    hda2_cp = CarInterface.get_params(CAR.KIA_EV6, hda2_fp, [], False, False, False, None)
+    assert hda2_cp.flags & HyundaiFlags.CANFD_LKA_STEERING
+    assert not hda2_cp.radarUnavailable
+
+    # Verify STATE, STATE_ALT fallback, and MOTION_STATE filter in ev6_210 decoder
+    radar = RadarInterface(hda1_cp)
+    packer = CANPacker(ev6_hda1_config.dbc_name)
+    messages = []
+    for addr in range(0x210, 0x220):
+      vals = {}
+      if addr == 0x210:
+        vals = {
+          "1_STATE": 3, "1_MOTION_STATE": 2, "1_LONG_DIST": 30.0, "1_LAT_DIST": -0.5,
+          "1_REL_SPEED": -2.5, "1_REL_ACCEL": -0.3, "1_REL_LAT_SPEED": 0.1,
+          "2_STATE": 0, "2_STATE_ALT": 2, "2_MOTION_STATE": 1, "2_LONG_DIST": 45.0,
+          "2_LAT_DIST": 1.2, "2_REL_SPEED": -5.0, "2_REL_ACCEL": 0.0, "2_REL_LAT_SPEED": -0.2,
+        }
+      elif addr == 0x211:
+        # Unknown motion state (0) is excluded even when STATE is valid
+        vals = {
+          "1_STATE": 3, "1_MOTION_STATE": 0, "1_LONG_DIST": 20.0,
+        }
+      msg = packer.make_can_msg(f"RADAR_TRACK_{addr:x}", 0, vals)
+      data = bytearray(msg[1])
+      checksum = hkg_can_fd_checksum(addr, None, data)
+      data[0] = checksum & 0xff
+      data[1] = (checksum >> 8) & 0xff
+      messages.append((addr, bytes(data), 1))
+    result = radar.update([(1, messages)])
+    assert result is not None
+    assert not result.errors.canError
+    assert len(result.points) == 2
+    assert (result.points[0].dRel, result.points[0].yRel, result.points[0].vRel) == pytest.approx((30.0, -0.5, -2.5))
+    assert (result.points[1].dRel, result.points[1].yRel, result.points[1].vRel) == pytest.approx((45.0, 1.2, -5.0))
 
   def test_palisade_telluride_hda2_uses_mixed_can_layout(self):
     fingerprint = gen_empty_fingerprint()

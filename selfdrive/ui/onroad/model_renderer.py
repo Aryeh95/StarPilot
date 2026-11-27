@@ -219,12 +219,21 @@ class ModelRenderer(Widget):
     self._road_edge_stds[:min(len(self._road_edges), len(road_edge_stds))] = road_edge_stds[:len(self._road_edges)]
     self._acceleration_x = np.array(model.acceleration.x, dtype=np.float32)
 
+  @staticmethod
+  def _should_skip_secondary_lead(leads, index: int) -> bool:
+    return (index == 1 and len(leads) >= 2 and
+            bool(leads[0] and getattr(leads[0], "status", False)) and
+            bool(leads[1] and getattr(leads[1], "status", False)) and
+            abs(leads[0].dRel - leads[1].dRel) <= 3.0)
+
   def _update_leads(self, radar_state, path_x_array):
     """Update positions of lead vehicles"""
     self._lead_vehicles = [LeadVehicle(), LeadVehicle()]
     leads = [radar_state.leadOne, radar_state.leadTwo]
 
     for i, lead_data in enumerate(leads):
+      if self._should_skip_secondary_lead(leads, i):
+        continue
       if lead_data and lead_data.status:
         d_rel, y_rel, v_rel = lead_data.dRel, lead_data.yRel, lead_data.vRel
         idx = self._get_path_length_idx(path_x_array, d_rel)
@@ -494,6 +503,8 @@ class ModelRenderer(Widget):
     leads = [radar_state.leadOne, radar_state.leadTwo]
 
     for i, lead in enumerate(self._lead_vehicles):
+      if self._should_skip_secondary_lead(leads, i):
+        continue
       if not lead.chevron:
         continue
 

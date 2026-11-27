@@ -145,3 +145,17 @@ def test_lead_marker_style_sizing_and_minimal_glow():
   minimal_w = minimal.chevron[0][0] - minimal.chevron[2][0]
   assert compact_w < standard_w
   assert minimal_w < compact_w
+
+
+def test_should_skip_secondary_lead_when_overlapping_primary():
+  lead_one = SimpleNamespace(status=True, dRel=25.0)
+  same_car = SimpleNamespace(status=True, dRel=26.5)
+  exact_boundary = SimpleNamespace(status=True, dRel=28.0)
+  separate_car = SimpleNamespace(status=True, dRel=28.5)
+  inactive = SimpleNamespace(status=False, dRel=25.0)
+
+  assert model_renderer.ModelRenderer._should_skip_secondary_lead([lead_one, same_car], 0) is False
+  assert model_renderer.ModelRenderer._should_skip_secondary_lead([lead_one, same_car], 1) is True
+  assert model_renderer.ModelRenderer._should_skip_secondary_lead([lead_one, exact_boundary], 1) is True
+  assert model_renderer.ModelRenderer._should_skip_secondary_lead([lead_one, separate_car], 1) is False
+  assert model_renderer.ModelRenderer._should_skip_secondary_lead([lead_one, inactive], 1) is False

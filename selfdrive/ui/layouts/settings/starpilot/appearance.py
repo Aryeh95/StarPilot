@@ -171,6 +171,12 @@ class StarPilotAppearanceLayout(_SettingsPage):
         if enabled:
             self._params.put_bool("DeveloperUI", True)
 
+    def _set_developer_widget(self, key, enabled):
+        self._params.put_bool(key, enabled)
+        if enabled:
+            self._params.put_bool("DeveloperWidgets", True)
+            self._params.put_bool("DeveloperUI", True)
+
     def _build_view(self):
         po = lambda: self._params.get_bool("PedalsOnUI")
         ol = lambda: starpilot_state.car_state.hasOpenpilotLongitudinal
@@ -458,10 +464,15 @@ class StarPilotAppearanceLayout(_SettingsPage):
                        get_state=lambda: self._params.get_bool("LeadMetricsTimeGap", default=True),
                        set_state=lambda s: self._params.put_bool("LeadMetricsTimeGap", s),
                        visible=lead_info_on),
+            SettingRow("AdjacentLeadsUI", "toggle", tr_noop("Adjacent Lead Tracking"),
+                       subtitle=tr_noop("Show radar-tracked vehicles in adjacent lanes."),
+                       get_state=lambda: self._params.get_bool("AdjacentLeadsUI"),
+                       set_state=lambda s: self._set_developer_widget("AdjacentLeadsUI", s),
+                       enabled=lambda: starpilot_state.car_state.hasRadar),
             SettingRow("RadarTracksUI", "toggle", tr_noop("Radar Point Display"),
                        subtitle="",
                        get_state=lambda: self._params.get_bool("RadarTracksUI"),
-                       set_state=lambda s: self._params.put_bool("RadarTracksUI", s),
+                       set_state=lambda s: self._set_developer_widget("RadarTracksUI", s),
                        enabled=lambda: starpilot_state.car_state.hasRadar),
             SettingRow("ShowStoppingPoint", "toggle", tr_noop("Show Stop Sign"),
                        subtitle="",

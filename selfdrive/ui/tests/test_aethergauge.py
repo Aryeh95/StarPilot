@@ -131,7 +131,7 @@ def test_lead_data_stopped():
 
 
 def test_is_stop_light():
-  _set_plan(redLight=True)
+  _set_plan(experimentalMode=False, redLight=True)
   assert _is_stop_light()
 
   mock_ui_state.sm["starpilotPlan"].redLight = False

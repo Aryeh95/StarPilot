@@ -216,9 +216,15 @@ class TestLeads:
     track.update(d_rel=19.0, y_rel=-1.0, v_rel=0.0, v_lead=20.0, measured=True)
     assert RADAR_TO_CAMERA > 1.0
     assert track.potential_adjacent_lead(left=False, standstill=False, model_data=model)
+    assert track.potential_adjacent_lead(left=False, standstill=True, model_data=model)
     assert not track.potential_adjacent_lead(left=True, standstill=False, model_data=model)
     assert track.leadRight
     assert not track.leadLeft
+
+    # Stopped adjacent tracks stay filtered even at ego standstill
+    slow_track = Track(8, 0.2, KalmanParams(DT_MDL))
+    slow_track.update(d_rel=19.0, y_rel=-1.0, v_rel=-0.2, v_lead=0.2, measured=True)
+    assert not slow_track.potential_adjacent_lead(left=False, standstill=True, model_data=model)
 
     # Freeze cached leadLeft/leadRight while laneChangeStarting
     model.meta.laneChangeState = LaneChangeState.laneChangeStarting

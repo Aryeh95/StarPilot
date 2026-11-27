@@ -217,7 +217,7 @@ def _force_stop_data() -> AetherGaugeData:
 # --- CEM: Stop light / stop sign ---
 
 def _is_stop_light() -> bool:
-  return _get_val("starpilotPlan", "experimentalMode", False) and _get_val("starpilotPlan", "redLight", False)
+  return bool(_get_val("starpilotPlan", "redLight", False))
 
 def _stop_light_data() -> AetherGaugeData:
   dist_m = _get_val("starpilotPlan", "forcingStopLength", 0.0)

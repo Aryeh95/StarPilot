@@ -172,7 +172,7 @@ class Track:
   def potential_adjacent_lead(self, left: bool, standstill: bool, model_data: capnp._DynamicStructReader):
     should_update_cached_leads = model_data.meta.laneChangeState != LaneChangeState.laneChangeStarting
 
-    if standstill or self.vLeadK < 1 or self.leadTrackID == self.identifier:
+    if self.vLeadK < 1 or self.leadTrackID == self.identifier:
       if should_update_cached_leads:
         self.leadLeft = False
         self.leadRight = False

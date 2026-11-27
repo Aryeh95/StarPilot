@@ -570,27 +570,26 @@ class ModelRenderer(Widget):
     if not placed_rects or not collides(padded_rect):
       return padded_rect, False
 
-    rect_cls = type(padded_rect)
     anchor_x = placed_rects[0].x + placed_rects[0].width / 2.0
     push_left = (padded_rect.x + padded_rect.width / 2.0) < anchor_x
 
-    shifted = rect_cls(padded_rect.x, padded_rect.y, padded_rect.width, padded_rect.height)
+    shifted = rl.Rectangle(padded_rect.x, padded_rect.y, padded_rect.width, padded_rect.height)
     for _ in range(3):
       if not collides(shifted):
         break
       for placed in placed_rects:
         if cls._rects_collide(shifted, placed):
           dx = (placed.x - margin - (shifted.x + shifted.width)) if push_left else (placed.x + placed.width + margin - shifted.x)
-          shifted = rect_cls(shifted.x + dx, shifted.y, shifted.width, shifted.height)
+          shifted = rl.Rectangle(shifted.x + dx, shifted.y, shifted.width, shifted.height)
 
     if shifted.x >= bounds_x and (shifted.x + shifted.width) <= (bounds_x + bounds_w) and not collides(shifted):
       return shifted, True
 
-    dropped = rect_cls(padded_rect.x, padded_rect.y, padded_rect.width, padded_rect.height)
+    dropped = rl.Rectangle(padded_rect.x, padded_rect.y, padded_rect.width, padded_rect.height)
     for _ in range(4):
       if not collides(dropped):
         break
-      dropped = rect_cls(dropped.x, dropped.y + line_height + margin, dropped.width, dropped.height)
+      dropped = rl.Rectangle(dropped.x, dropped.y + line_height + margin, dropped.width, dropped.height)
     return dropped, True
 
   def _draw_lead_metrics(self, adjacent, chevron, lead_data, marker_color=None):

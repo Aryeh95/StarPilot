@@ -87,13 +87,28 @@ def test_adjacent_path_keeps_a_single_valid_side(monkeypatch, lane_width_left, l
   assert renderer._adjacent_path_vertices[1 - expected_side].size == 0
 
 
-def test_place_lead_label_rect_pushes_outward_and_drops_when_out_of_bounds():
-  Rect = lambda x, y, w, h: SimpleNamespace(x=x, y=y, width=w, height=h)
-  primary = Rect(900.0, 500.0, 200.0, 120.0)
+def test_place_lead_label_rect_pushes_outward_and_drops_when_out_of_bounds(monkeypatch):
+  class _CDataRect:
+    __slots__ = ("x", "y", "width", "height")
+
+    def __init__(self, x, y, width, height, *, _from_factory=False):
+      if not _from_factory:
+        raise TypeError("cannot create '_cffi_backend.__CDataOwn' instances")
+      self.x = x
+      self.y = y
+      self.width = width
+      self.height = height
+
+  monkeypatch.setattr(
+    model_renderer.rl,
+    "Rectangle",
+    lambda x, y, width, height: _CDataRect(x, y, width, height, _from_factory=True),
+  )
+  primary = model_renderer.rl.Rectangle(900.0, 500.0, 200.0, 120.0)
   placed = [primary]
 
   # Left adjacent label colliding with primary is pushed outward to the left
-  left_rect = Rect(820.0, 510.0, 140.0, 80.0)
+  left_rect = model_renderer.rl.Rectangle(820.0, 510.0, 140.0, 80.0)
   placed_left, displaced_left = model_renderer.ModelRenderer._place_lead_label_rect(
     left_rect, line_height=34.0, margin=8.5, bounds_x=0.0, bounds_w=2160.0, placed_rects=placed,
   )
@@ -101,8 +116,8 @@ def test_place_lead_label_rect_pushes_outward_and_drops_when_out_of_bounds():
   assert placed_left.x + placed_left.width <= primary.x
 
   # Right label with no horizontal room falls back to dropping down a line
-  right_edge = Rect(2000.0, 500.0, 150.0, 120.0)
-  colliding = Rect(2020.0, 510.0, 140.0, 80.0)
+  right_edge = model_renderer.rl.Rectangle(2000.0, 500.0, 150.0, 120.0)
+  colliding = model_renderer.rl.Rectangle(2020.0, 510.0, 140.0, 80.0)
   dropped, displaced_drop = model_renderer.ModelRenderer._place_lead_label_rect(
     colliding, line_height=34.0, margin=8.5, bounds_x=0.0, bounds_w=2160.0, placed_rects=[right_edge],
   )
